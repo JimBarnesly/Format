@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#08090c">
+    <title>Signal — Music Library</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">S</span><span>Signal</span></a>
+      <nav>
+        <a class="active" href="#discover" data-page-link="discover"><span>⌂</span> Discover</a>
+        <a href="#library" data-page-link="library"><span>▦</span> Library</a>
+        <a href="#downloads" data-page-link="downloads"><span>↓</span> Downloads</a>
+        <a href="http://192.168.68.60:4533/" target="_blank"><span>◉</span> Navidrome</a>
+      </nav>
+      <div class="library-state">
+        <span class="pulse"></span>
+        <div><strong>Local library</strong><small id="library-count">Scanning…</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div class="mobile-brand"><span class="brand-mark">S</span> Signal</div>
+        <label class="search">
+          <span>⌕</span>
+          <input id="search" type="search" placeholder="Search artists, albums, songs, genres…">
+          <kbd>/</kbd>
+        </label>
+        <span id="rescan-status" class="rescan-status" role="status" aria-live="polite"></span>
+        <div id="rate-limit-clock" class="rate-limit-clock" role="status" aria-live="polite" title="Album lookup cooldown">
+          <span>◷</span><strong id="rate-limit-time">00:00</strong>
+        </div>
+        <button id="rescan" class="icon-button" title="Rescan library">↻</button>
+        <div class="mobile-tabs">
+          <a href="#discover" data-page-link="discover">Discover</a>
+          <a href="#library" data-page-link="library">Library</a>
+          <a href="#downloads" data-page-link="downloads">Downloads</a>
+        </div>
+      </header>
+
+      <div id="page-discover" class="page active-page">
+      <section class="hero">
+        <div class="hero-art" id="hero-art"></div>
+        <div class="hero-shade"></div>
+        <div class="hero-content">
+          <span class="eyebrow">FROM YOUR LIBRARY</span>
+          <h1 id="hero-title">Your music, on your network.</h1>
+          <p id="hero-copy">Browse the collection and find the next thing worth hearing.</p>
+          <div class="hero-actions">
+            <button id="hero-play" class="primary">▶ Play album</button>
+            <button id="hero-info" class="secondary">View tracks</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="shelf">
+        <div class="section-heading">
+          <div><span class="eyebrow">BASED ON YOUR LIBRARY</span><h2>Artists to explore</h2></div>
+          <div class="heading-actions"><span class="source-note">Recommendations via Last.fm</span><button id="refresh-recommendations" class="refresh-button">↻ Refresh</button></div>
+        </div>
+        <div id="recommendations" class="cards recommendation-cards"></div>
+      </section>
+
+      <section class="shelf">
+        <div class="section-heading">
+          <div><span class="eyebrow">DAILY DISCOVERY</span><h2>Review before downloading</h2><p>Connected-artist albums waiting for your ownership confirmation.</p></div>
+          <div class="heading-actions"><span id="discovery-count" class="source-note">0 to review</span><button id="refresh-discovery" class="refresh-button">↻ Refresh</button></div>
+        </div>
+        <div id="daily-discoveries" class="cards discovery-cards"></div>
+      </section>
+
+      <section id="search-results" class="shelf hidden">
+        <div class="section-heading">
+          <div><span class="eyebrow">CATALOGUE</span><h2 id="catalogue-title">Artist albums</h2><p id="catalogue-meta"></p></div>
+          <span class="source-note">Album catalogue via MusicBrainz</span>
+        </div>
+        <div id="catalogue-status" class="catalogue-status"></div>
+        <div id="catalogue-albums" class="cards catalogue-cards"></div>
+        <div id="local-albums-wrap" class="local-matches hidden">
+          <span id="local-albums-heading" class="eyebrow">ALBUMS IN YOUR LIBRARY</span>
+          <div id="local-albums" class="cards local-album-cards"></div>
+        </div>
+        <div id="local-matches-wrap" class="local-matches hidden">
+          <span id="local-tracks-heading" class="eyebrow">SONGS IN YOUR LIBRARY</span>
+          <div id="results" class="track-results"></div>
+        </div>
+      </section>
+      </div>
+
+      <div id="page-library" class="page">
+        <section class="shelf page-heading-shelf">
+          <div class="section-heading"><div><span class="eyebrow">ON THIS GATEWAY</span><h2>Your library</h2><p>Albums available to play locally.</p></div></div>
+          <div id="albums" class="cards"></div>
+        </section>
+      </div>
+
+      <div id="page-downloads" class="page">
+      <section class="shelf downloads-page page-heading-shelf">
+        <div class="section-heading">
+          <div><span class="eyebrow">DOWNLOAD MANAGER</span><h2>Downloads</h2><p>SpotiFLAC runs one album at a time.</p></div>
+          <span id="downloader-state" class="downloader-state"><i></i> Worker online</span>
+        </div>
+        <div id="active-download" class="active-download hidden"></div>
+        <div class="download-columns">
+          <div class="download-column">
+            <div class="download-column-heading"><h3>Queue</h3><span id="queue-total">0 albums</span></div>
+            <div id="download-queue" class="download-list"></div>
+          </div>
+          <div class="download-column">
+            <div class="download-column-heading"><h3>History</h3><span id="history-total">0 albums</span></div>
+            <div id="download-history" class="download-list"></div>
+          </div>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <dialog id="album-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <div class="dialog-cover" id="dialog-cover"></div>
+      <div class="dialog-body">
+        <span class="eyebrow">ALBUM</span>
+        <h2 id="dialog-title"></h2>
+        <p id="dialog-meta"></p>
+        <div class="dialog-actions">
+          <button id="dialog-play" class="primary">▶ Play album</button>
+          <a id="dialog-download" class="secondary" href="#" download>↓ Download album</a>
+          <button id="dialog-delete" class="danger-button" type="button">Delete album</button>
+        </div>
+        <div id="dialog-tracks" class="track-list"></div>
+      </div>
+    </dialog>
+
+    <footer class="player">
+      <div class="now-playing">
+        <div id="player-cover" class="mini-cover"></div>
+        <div><strong id="player-title">Nothing playing</strong><small id="player-artist">Choose a track</small></div>
+      </div>
+      <div class="transport">
+        <div class="transport-buttons">
+          <button id="previous" aria-label="Previous">◀</button>
+          <button id="toggle" class="play-button" aria-label="Play">▶</button>
+          <button id="next" aria-label="Next">▶</button>
+        </div>
+        <div class="timeline"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="100" value="0"><span id="duration">0:00</span></div>
+      </div>
+      <label class="volume">◖<input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+      <audio id="audio"></audio>
+    </footer>
+    <aside id="download-panel" class="download-panel hidden" aria-live="polite">
+      <div class="download-icon">↓</div>
+      <div class="download-details">
+        <div class="download-heading"><strong id="download-title">Preparing download</strong><span id="download-percent">0%</span></div>
+        <div class="download-bar"><span id="download-progress"></span></div>
+        <small id="download-message">Connecting…</small>
+        <small id="download-queue-count"></small>
+      </div>
+      <button id="download-dismiss" aria-label="Dismiss">×</button>
+    </aside>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+services:
+  music-browser:
+    build: .
+    container_name: gateway-music-browser
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app
+    command: node server.mjs
+    user: "1000:1000"
+    environment:
+      MUSIC_ROOT: /music
+      CACHE_DIR: /cache
+      DATA_DIR: /data
+      LIBRARY_SCAN_INTERVAL_MS: "900000"
+      PORT: "4534"
+    volumes:
+      - ./:/app:ro
+      - /home/jake/Music:/music:ro
+      - /home/jake/.cache/gateway-music-browser:/cache
+      - /home/jake/.local/share/gateway-music-browser:/data
