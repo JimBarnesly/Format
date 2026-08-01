@@ -21,6 +21,8 @@ const testMode = process.env.NODE_ENV === "test";
 const spotiflacBin = process.env.SPOTIFLAC_BIN || "spotiflac";
 const libraryScanIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_SCAN_INTERVAL_MS || 15 * 60 * 1000));
 const libraryMaintenanceIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_MAINTENANCE_INTERVAL_MS || 24 * 60 * 60 * 1000));
+const acquisitionStallTimeoutMs = Math.max(testMode ? 250 : 60_000, Number(process.env.ACQUISITION_STALL_TIMEOUT_MS || 12 * 60 * 1000));
+const acquisitionMaxAttempts = Math.max(1, Number(process.env.ACQUISITION_MAX_ATTEMPTS || 3));
 const audioExtensions = new Set([".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav"]);
 const catalogueReleases = new Map();
 const spotifyResolutionCache = new Map([
@@ -723,6 +725,7 @@ async function runAcquisition(state, release) {
   }
   state.status = "running";
   state.message = "Starting download…";
+  state.attempt = (state.attempt || 0) + 1;
   void saveAcquisitions();
   const child = spawn(
     spotiflacBin,
@@ -770,12 +773,12 @@ async function runAcquisition(state, release) {
     if (current !== previous) lastProgressAt = Date.now();
   };
   const inactivityTimer = setInterval(() => {
-    if (Date.now() - lastProgressAt < 12 * 60 * 1000) return;
+    if (Date.now() - lastProgressAt < acquisitionStallTimeoutMs) return;
     state.timeoutRequested = true;
-    state.message = "Provider stalled for 12 minutes; stopping download.";
+    state.message = "Provider stalled; stopping this attempt.";
     void saveAcquisitions();
     terminateProcessTree(child);
-  }, 15_000);
+  }, Math.min(15_000, Math.max(100, Math.floor(acquisitionStallTimeoutMs / 4))));
   inactivityTimer.unref();
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
@@ -791,10 +794,19 @@ async function runAcquisition(state, release) {
     if (state.finishedAt) return;
     activeAcquisitionProcess = null;
     if (state.timeoutRequested) {
-      state.status = "failed";
-      state.message = "Provider stalled for 12 minutes. Retry will use the provider fallback chain.";
-      state.finishedAt = new Date().toISOString();
       delete state.timeoutRequested;
+      if (state.attempt < acquisitionMaxAttempts) {
+        state.status = "queued";
+        state.message = `Provider stalled. Retrying automatically (${state.attempt + 1}/${acquisitionMaxAttempts}).`;
+        state.progress = 0;
+        state.trackNumber = 0;
+        state.currentTrack = "";
+        acquisitionQueue.push(state.id);
+      } else {
+        state.status = "failed";
+        state.message = `Provider stalled on ${acquisitionMaxAttempts} attempts.`;
+        state.finishedAt = new Date().toISOString();
+      }
       finishAcquisition(state);
       return;
     }
@@ -813,7 +825,10 @@ async function runAcquisition(state, release) {
       && normalized(album.title) === normalized(state.title)
     );
     state.status = reportedSuccess && libraryAlbum && !libraryAlbum.incomplete ? "complete" : "failed";
-    if (state.status === "complete") state.progress = 100;
+    if (state.status === "complete") {
+      state.progress = 100;
+      delete state.attempt;
+    }
     state.message = state.status === "complete"
       ? "Added to your library."
       : (tail.match(/(?:Failed|ERROR|Error):?[^\n]*/g)?.at(-1)
