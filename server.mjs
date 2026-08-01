@@ -32,6 +32,7 @@ const acquisitionState = new Map();
 const acquisitionQueue = [];
 let activeAcquisitionId = null;
 let activeAcquisitionProcess = null;
+let initialLibraryScanComplete = false;
 let acquisitionSavePromise = Promise.resolve();
 let lookupRetryTimer = null;
 let lastMusicBrainzRequestAt = 0;
@@ -847,7 +848,7 @@ function cancelAcquisition(id) {
 }
 
 function processAcquisitionQueue() {
-  if (activeAcquisitionId || acquisitionQueue.length === 0) return;
+  if (!initialLibraryScanComplete || activeAcquisitionId || acquisitionQueue.length === 0) return;
   const id = acquisitionQueue.shift();
   const state = acquisitionState.get(id);
   const release = catalogueReleases.get(id);
@@ -1320,11 +1321,12 @@ await loadLookupRateLimit();
 server.listen(port, "0.0.0.0", () => {
   console.log(`Music browser listening on http://0.0.0.0:${port}`);
 });
-processAcquisitionQueue();
 void scanLibrary()
   .then(() => {
+    initialLibraryScanComplete = true;
     reconcileCompletedAcquisitions();
     recoverApprovedDiscoveries();
+    processAcquisitionQueue();
   })
   .catch((error) => console.error("Initial library scan failed:", error.message));
 const libraryScanTimer = setInterval(() => {
