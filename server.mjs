@@ -3,6 +3,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -14,10 +15,12 @@ const dataDir = resolve(process.env.DATA_DIR || "/home/jake/.local/share/gateway
 const discoveryFile = join(dataDir, "discovery.json");
 const acquisitionFile = join(dataDir, "acquisitions.json");
 const rateLimitFile = join(dataDir, "lookup-rate-limit.json");
+const metadataCorrectionsFile = resolve(process.env.METADATA_CORRECTIONS_FILE || "metadata-corrections.json");
 const port = Number(process.env.PORT || 4534);
 const testMode = process.env.NODE_ENV === "test";
 const spotiflacBin = process.env.SPOTIFLAC_BIN || "spotiflac";
 const libraryScanIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_SCAN_INTERVAL_MS || 15 * 60 * 1000));
+const libraryMaintenanceIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_MAINTENANCE_INTERVAL_MS || 24 * 60 * 60 * 1000));
 const audioExtensions = new Set([".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav"]);
 const catalogueReleases = new Map();
 const spotifyResolutionCache = new Map([
@@ -174,8 +177,74 @@ async function probe(path) {
   };
 }
 
+async function sha256(path) {
+  return new Promise((resolveHash, reject) => {
+    const hash = createHash("sha256");
+    const input = createReadStream(path);
+    input.on("error", reject);
+    input.on("data", (chunk) => hash.update(chunk));
+    input.on("end", () => resolveHash(hash.digest("hex")));
+  });
+}
+
+async function loadMetadataCorrections() {
+  try {
+    const parsed = JSON.parse(await readFile(metadataCorrectionsFile, "utf8"));
+    return Array.isArray(parsed.corrections) ? parsed.corrections : [];
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("Could not load metadata corrections:", error.message);
+    return [];
+  }
+}
+
+async function applyMetadataCorrections(paths) {
+  const corrections = await loadMetadataCorrections();
+  if (!corrections.length) return [];
+  const byHash = new Map(corrections.map((correction) => [correction.sha256, correction]));
+  const applied = [];
+  for (const source of paths) {
+    const correction = byHash.get(await sha256(source));
+    if (!correction) continue;
+    const destination = safeMusicPath(correction.relativePath || "");
+    if (!destination) {
+      console.error(`Ignoring unsafe metadata correction destination: ${correction.relativePath}`);
+      continue;
+    }
+    await mkdir(join(destination, ".."), { recursive: true });
+    const temporary = `${destination}.metadata-fix-${process.pid}${extname(destination)}`;
+    const metadata = [
+      ["artist", correction.artist], ["album_artist", correction.albumArtist],
+      ["album", correction.album], ["title", correction.title], ["date", correction.date],
+      ["track", correction.track], ["tracktotal", correction.trackTotal],
+      ["disc", correction.disc], ["disctotal", correction.discTotal]
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    await execFileAsync("ffmpeg", ["-loglevel", "error", "-i", source, "-map", "0:a", "-c", "copy", "-map_metadata", "0",
+      ...metadata.flatMap(([name, value]) => ["-metadata", `${name}=${value}`]), "-y", temporary]);
+    if (existsSync(destination) && resolve(source) !== resolve(destination)) {
+      const duplicateDir = join(dataDir, "metadata-duplicates");
+      await mkdir(duplicateDir, { recursive: true });
+      await rename(source, join(duplicateDir, `${correction.sha256}-${source.split(sep).at(-1)}`));
+      await rename(temporary, destination);
+    } else {
+      await rename(temporary, destination);
+      if (resolve(source) !== resolve(destination) && existsSync(source)) {
+        const duplicateDir = join(dataDir, "metadata-originals");
+        await mkdir(duplicateDir, { recursive: true });
+        await rename(source, join(duplicateDir, `${correction.sha256}-${source.split(sep).at(-1)}`));
+      }
+    }
+    applied.push({ source: relative(root, source), destination: relative(root, destination), reason: correction.reason || "Configured correction" });
+  }
+  return applied;
+}
+
 async function performLibraryScan() {
-  const paths = await walk(root);
+  let paths = await walk(root);
+  const corrections = await applyMetadataCorrections(paths);
+  if (corrections.length) {
+    console.log(`Applied ${corrections.length} metadata correction${corrections.length === 1 ? "" : "s"}.`);
+    paths = await walk(root);
+  }
   const tracks = [];
   for (const path of paths) {
     try {
@@ -940,6 +1009,14 @@ async function generateDiscovery({ force = false } = {}) {
   throw new Error("No new connected-artist album was available today.");
 }
 
+async function acquireRandomSimilarAlbum() {
+  const item = await generateDiscovery({ force: true });
+  item.status = "approved";
+  item.reviewedAt = new Date().toISOString();
+  await saveDiscoveries();
+  return queueAlbum(item.id, catalogueReleases.get(item.id));
+}
+
 async function musicBrainz(path) {
   const waitMs = Math.max(0, 1100 - (Date.now() - lastMusicBrainzRequestAt));
   if (waitMs) await new Promise((resolveDelay) => setTimeout(resolveDelay, waitMs));
@@ -1176,6 +1253,13 @@ const server = createServer(async (request, response) => {
         return sendJson(response, 503, { error: error.message });
       }
     }
+    if (url.pathname === "/api/discoveries/acquire-random" && request.method === "POST") {
+      try {
+        return sendJson(response, 202, await acquireRandomSimilarAlbum());
+      } catch (error) {
+        return sendJson(response, 503, { error: error.message });
+      }
+    }
     if (url.pathname === "/api/discoveries/dismiss" && request.method === "POST") {
       const item = discoveries.find((entry) => entry.id === url.searchParams.get("id"));
       if (!item) return sendJson(response, 404, { error: "Discovery item not found" });
@@ -1247,3 +1331,7 @@ const libraryScanTimer = setInterval(() => {
   void scanLibrary().catch((error) => console.error("Scheduled library scan failed:", error.message));
 }, libraryScanIntervalMs);
 libraryScanTimer.unref();
+const libraryMaintenanceTimer = setInterval(() => {
+  void repairIncompleteAlbums().catch((error) => console.error("Scheduled library maintenance failed:", error.message));
+}, libraryMaintenanceIntervalMs);
+libraryMaintenanceTimer.unref();

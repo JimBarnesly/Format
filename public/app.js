@@ -169,7 +169,7 @@ function renderDiscoveries(items) {
       <h3>${item.title}</h3>
       <p>${item.artist}${item.year ? ` · ${item.year}` : ""}</p>
       <p class="discovery-origin">Via ${item.seedArtist} — ${item.seedAlbum}</p>
-      <div class="discovery-actions"><button class="approve">I own this — add</button><button class="dismiss">Dismiss</button></div>`;
+      <div class="discovery-actions"><button class="approve">Download album</button><button class="dismiss">Dismiss</button></div>`;
     const image = new Image();
     image.onload = () => {
       const cover = node.querySelector(".cover");
@@ -536,6 +536,21 @@ $("#rescan").onclick = async () => {
 };
 $("#refresh-recommendations").onclick = refreshRecommendations;
 $("#refresh-discovery").onclick = refreshDiscovery;
+$("#acquire-similar").onclick = async () => {
+  const button = $("#acquire-similar");
+  button.disabled = true;
+  button.textContent = "Finding album…";
+  try {
+    const response = await fetch("/api/discoveries/acquire-random", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Could not queue a similar album.");
+    updateDownloadPanel(result);
+    renderQueueSummary(await fetch("/api/acquisitions").then((value) => value.json()));
+  } finally {
+    button.disabled = false;
+    button.textContent = "↓ Download similar album";
+  }
+};
 document.addEventListener("keydown", (event) => {
   if (event.key === "/" && document.activeElement !== $("#search")) {
     event.preventDefault();

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "corrections": [
+    {
+      "sha256": "e255d80cf0cb8a02d724d85f67c3102f8e38753ca8de826c4b514f81c790d578",
+      "reason": "Provider misidentified Sola Rosa — The Ace of Space as Awish",
+      "artist": "Sola Rosa",
+      "albumArtist": "Sola Rosa",
+      "album": "Get It Together",
+      "title": "The Ace of Space",
+      "date": "2009",
+      "track": "1",
+      "trackTotal": "11",
+      "disc": "1",
+      "discTotal": "1",
+      "relativePath": "SpotiFLAC/Sola Rosa/Get It Together/[2009] Get It Together/01. The Ace of Space.flac"
+    }
+  ]
+}

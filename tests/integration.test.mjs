@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { execFile, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -59,6 +60,16 @@ before(async () => {
   await flac(join(fixtureDir, "03.flac"), { artist: "Fixture Artist", album: "Fixture Album", title: "Three", year: "2020", track: 3, total: 3 });
   await flac(join(fixtureDir, "rogue-reissue.flac"), { artist: "Fixture Artist", album: "Fixture Album", title: "One (Reissue)", year: "2021", track: 1, total: 29 });
 
+  const wrongMetadata = join(musicRoot, "Sola Rosa", "Haunted Out-Takes", "06. Awish.flac");
+  await flac(wrongMetadata, { artist: "Sola Rosa", album: "Haunted Out-Takes", title: "Awish", year: "2003", track: 6, total: 11 });
+  const wrongHash = createHash("sha256").update(await readFile(wrongMetadata)).digest("hex");
+  const correctionFile = join(temporary, "metadata-corrections.json");
+  await writeFile(correctionFile, JSON.stringify({ schemaVersion: 1, corrections: [{
+    sha256: wrongHash, artist: "Sola Rosa", albumArtist: "Sola Rosa", album: "Get It Together",
+    title: "The Ace of Space", date: "2009", track: "1", trackTotal: "11", disc: "1", discTotal: "1",
+    relativePath: "Sola Rosa/Get It Together/01. The Ace of Space.flac"
+  }] }));
+
   const acquisitionFixtures = join(temporary, "acquisition-fixtures");
   for (let track = 1; track <= 2; track += 1) {
     await flac(join(acquisitionFixtures, `${track}.flac`), {
@@ -79,6 +90,7 @@ before(async () => {
       DATA_DIR: join(temporary, "data"), CACHE_DIR: join(temporary, "cache"),
       DOWNLOAD_ROOT: join(musicRoot, "SpotiFLAC"), SPOTIFLAC_BIN: mock,
       TEST_ACQUISITION_SOURCE_URL: "https://music.apple.com/nz/album/test/{id}",
+      METADATA_CORRECTIONS_FILE: correctionFile,
       MOCK_FIXTURES: acquisitionFixtures
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -113,6 +125,16 @@ test("groups inconsistent release years and ignores rogue track totals", async (
   assert.equal(albums[0].expectedTracks, 3);
   assert.equal(albums[0].incomplete, false);
   assert.deepEqual(albums[0].missingTracks, []);
+});
+
+test("applies hash-verified metadata corrections and relocates the track", async () => {
+  const { body } = await json("/api/library");
+  const track = body.tracks.find((item) => item.title === "The Ace of Space");
+  assert.ok(track);
+  assert.equal(track.artist, "Sola Rosa");
+  assert.equal(track.album, "Get It Together");
+  assert.equal(track.track, 1);
+  assert.equal(body.tracks.some((item) => item.title === "Awish"), false);
 });
 
 test("streams complete and ranged audio safely", async () => {
