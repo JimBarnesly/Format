@@ -1011,6 +1011,11 @@ async function generateDiscovery({ force = false } = {}) {
 }
 
 async function acquireRandomSimilarAlbum() {
+  if (testMode && process.env.TEST_SIMILAR_RELEASE) {
+    const release = JSON.parse(process.env.TEST_SIMILAR_RELEASE);
+    catalogueReleases.set(release.id, release);
+    return queueAlbum(release.id, release);
+  }
   const item = await generateDiscovery({ force: true });
   item.status = "approved";
   item.reviewedAt = new Date().toISOString();

@@ -545,6 +545,7 @@ $("#acquire-similar").onclick = async () => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Could not queue a similar album.");
     updateDownloadPanel(result);
+    watchAcquisition(result.id, null);
     renderQueueSummary(await fetch("/api/acquisitions").then((value) => value.json()));
   } finally {
     button.disabled = false;

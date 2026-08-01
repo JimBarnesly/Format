@@ -76,8 +76,12 @@ before(async () => {
       artist: "Test Artist", album: "Test Album", title: `Track ${track}`, year: "2024", track, total: 2
     });
   }
+  const similarFixtures = join(temporary, "similar-fixtures");
+  await flac(join(similarFixtures, "1.flac"), {
+    artist: "Similar Artist", album: "Similar Album", title: "Similar Track", year: "2025", track: 1, total: 1
+  });
   const mock = join(temporary, "mock-spotiflac.sh");
-  await writeFile(mock, `#!/bin/sh\nset -eu\ncase "$1" in\n  *slow-release*) sleep 30; exit 0 ;;\n  *empty-release*) exit 0 ;;\nesac\nout="$2/Test Artist/Test Album/[2024] Test Album"\nmkdir -p "$out"\ncp "$MOCK_FIXTURES/1.flac" "$out/01. Track 1.flac"\ncp "$MOCK_FIXTURES/2.flac" "$out/02. Track 2.flac"\n`, "utf8");
+  await writeFile(mock, `#!/bin/sh\nset -eu\ncase "$1" in\n  *slow-release*) sleep 30; exit 0 ;;\n  *empty-release*) exit 0 ;;\n  *similar-release*) out="$2/Similar Artist/Similar Album/[2025] Similar Album"; mkdir -p "$out"; cp "$SIMILAR_FIXTURES/1.flac" "$out/01. Similar Track.flac"; exit 0 ;;\nesac\nout="$2/Test Artist/Test Album/[2024] Test Album"\nmkdir -p "$out"\ncp "$MOCK_FIXTURES/1.flac" "$out/01. Track 1.flac"\ncp "$MOCK_FIXTURES/2.flac" "$out/02. Track 2.flac"\n`, "utf8");
   await chmod(mock, 0o755);
 
   const port = await freePort();
@@ -91,7 +95,9 @@ before(async () => {
       DOWNLOAD_ROOT: join(musicRoot, "SpotiFLAC"), SPOTIFLAC_BIN: mock,
       TEST_ACQUISITION_SOURCE_URL: "https://music.apple.com/nz/album/test/{id}",
       METADATA_CORRECTIONS_FILE: correctionFile,
-      MOCK_FIXTURES: acquisitionFixtures
+      MOCK_FIXTURES: acquisitionFixtures,
+      SIMILAR_FIXTURES: similarFixtures,
+      TEST_SIMILAR_RELEASE: JSON.stringify({ id: "similar-release", artist: "Similar Artist", title: "Similar Album", year: "2025" })
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -176,6 +182,20 @@ test("single-click acquisition becomes a verified library album", async () => {
   assert.ok(album);
   assert.equal(album.incomplete, false);
   assert.equal(album.trackIds.length, 2);
+});
+
+test("random similar-album acquisition downloads and appears in the library", async () => {
+  const queued = await json("/api/discoveries/acquire-random", { method: "POST" });
+  assert.equal(queued.response.status, 202);
+  assert.equal(queued.body.id, "similar-release");
+  await waitFor(async () => {
+    const { body } = await json("/api/acquisitions");
+    return body.find((item) => item.id === "similar-release")?.status === "complete";
+  });
+  const { body } = await json("/api/library");
+  const album = body.albums.find((item) => item.artist === "Similar Artist" && item.title === "Similar Album");
+  assert.ok(album);
+  assert.equal(album.incomplete, false);
 });
 
 test("does not report success when a downloader exits without files", async () => {
