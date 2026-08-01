@@ -84,8 +84,12 @@ before(async () => {
   await flac(join(flakyFixtures, "1.flac"), {
     artist: "Flaky Artist", album: "Flaky Album", title: "Recovered Track", year: "2025", track: 1, total: 1
   });
+  const rateFixtures = join(temporary, "rate-fixtures");
+  await flac(join(rateFixtures, "1.flac"), {
+    artist: "Rate Artist", album: "Rate Album", title: "Delayed Track", year: "2025", track: 1, total: 1
+  });
   const mock = join(temporary, "mock-spotiflac.sh");
-  await writeFile(mock, `#!/bin/sh\nset -eu\ncase "$1" in\n  *slow-release*) sleep 30; exit 0 ;;\n  *empty-release*) exit 0 ;;\n  *flaky-release*) if [ ! -f "$FLAKY_MARKER" ]; then touch "$FLAKY_MARKER"; sleep 5; fi; out="$2/Flaky Artist/Flaky Album/[2025] Flaky Album"; mkdir -p "$out"; cp "$FLAKY_FIXTURES/1.flac" "$out/01. Recovered Track.flac"; exit 0 ;;\n  *similar-release*) out="$2/Similar Artist/Similar Album/[2025] Similar Album"; mkdir -p "$out"; cp "$SIMILAR_FIXTURES/1.flac" "$out/01. Similar Track.flac"; exit 0 ;;\nesac\nout="$2/Test Artist/Test Album/[2024] Test Album"\nmkdir -p "$out"\ncp "$MOCK_FIXTURES/1.flac" "$out/01. Track 1.flac"\ncp "$MOCK_FIXTURES/2.flac" "$out/02. Track 2.flac"\n`, "utf8");
+  await writeFile(mock, `#!/bin/sh\nset -eu\ncase "$1" in\n  *slow-release*) sleep 30; exit 0 ;;\n  *empty-release*) exit 0 ;;\n  *rate-release*) out="$2/Rate Artist/Rate Album/[2025] Rate Album"; mkdir -p "$out"; cp "$RATE_FIXTURES/1.flac" "$out/01. Delayed Track.flac"; exit 0 ;;\n  *flaky-release*) if [ ! -f "$FLAKY_MARKER" ]; then touch "$FLAKY_MARKER"; sleep 5; fi; out="$2/Flaky Artist/Flaky Album/[2025] Flaky Album"; mkdir -p "$out"; cp "$FLAKY_FIXTURES/1.flac" "$out/01. Recovered Track.flac"; exit 0 ;;\n  *similar-release*) out="$2/Similar Artist/Similar Album/[2025] Similar Album"; mkdir -p "$out"; cp "$SIMILAR_FIXTURES/1.flac" "$out/01. Similar Track.flac"; exit 0 ;;\nesac\nout="$2/Test Artist/Test Album/[2024] Test Album"\nmkdir -p "$out"\ncp "$MOCK_FIXTURES/1.flac" "$out/01. Track 1.flac"\ncp "$MOCK_FIXTURES/2.flac" "$out/02. Track 2.flac"\n`, "utf8");
   await chmod(mock, 0o755);
 
   const port = await freePort();
@@ -102,6 +106,7 @@ before(async () => {
       MOCK_FIXTURES: acquisitionFixtures,
       SIMILAR_FIXTURES: similarFixtures,
       FLAKY_FIXTURES: flakyFixtures,
+      RATE_FIXTURES: rateFixtures,
       FLAKY_MARKER: join(temporary, "flaky-marker"),
       ACQUISITION_STALL_TIMEOUT_MS: "300",
       ACQUISITION_MAX_ATTEMPTS: "2",
@@ -172,6 +177,20 @@ test("creates an owned-album archive", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-disposition"), /Fixture Artist - Fixture Album/);
   assert.ok((await response.arrayBuffer()).byteLength > 0);
+});
+
+test("holds queued albums during a catalogue rate limit and resumes at zero", async () => {
+  await json("/api/test/catalogue?id=rate-release&artist=Rate%20Artist&title=Rate%20Album&year=2025", { method: "POST" });
+  const limited = await json("/api/test/rate-limit?ms=500", { method: "POST" });
+  assert.equal(limited.body.active, true);
+  await json("/api/acquire-album?id=rate-release", { method: "POST" });
+  const during = (await json("/api/acquisitions")).body.find((item) => item.id === "rate-release");
+  assert.equal(during.status, "queued");
+  await waitFor(async () => {
+    const { body } = await json("/api/acquisitions");
+    return body.find((item) => item.id === "rate-release")?.status === "complete";
+  });
+  assert.equal((await json("/api/rate-limit")).body.active, false);
 });
 
 test("automatically retries a stalled provider and completes the album", async () => {

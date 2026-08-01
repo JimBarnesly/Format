@@ -83,6 +83,10 @@ async function fetchWithRetry(url, options = {}, label = new URL(url).hostname) 
       throw responseError(response, label);
     } catch (error) {
       lastError = error;
+      if (error.status === 429) {
+        triggerLookupRateLimit(error.retryAfterMs);
+        throw error;
+      }
       const transient = error.status === 429
         || (Number.isInteger(error.status) && error.status >= 500)
         || /timeout|aborted|fetch failed/i.test(error.message);
@@ -644,12 +648,15 @@ async function resolveMusicBrainzAlbumSource(release) {
     release.sourceUrl = process.env.TEST_ACQUISITION_SOURCE_URL.replace("{id}", encodeURIComponent(release.id));
     return release.sourceUrl;
   }
+  if (/^https:\/\/(?:music\.apple\.com|listen\.tidal\.com|tidal\.com)\//i.test(release.sourceUrl || "")) {
+    return release.sourceUrl;
+  }
   const mbid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release.id || "")
     ? release.id
     : null;
   let group;
   if (mbid) {
-    group = await musicBrainz(`/release-group/${mbid}?inc=artist-credits&fmt=json`);
+    group = await musicBrainz(`/release-group/${mbid}?inc=artist-credits+url-rels&fmt=json`);
   } else {
     const query = `releasegroup:${release.title} AND artist:${release.artist}`;
     const result = await musicBrainz(`/release-group?query=${encodeURIComponent(query)}&fmt=json&limit=10`);
@@ -668,6 +675,14 @@ async function resolveMusicBrainzAlbumSource(release) {
     && !matchedArtist.includes(requestedArtist)
     && !requestedArtist.includes(matchedArtist)) {
     throw new Error("MusicBrainz artist did not match the requested album.");
+  }
+  const linkedSource = (group.relations || [])
+    .map((relation) => relation.url?.resource)
+    .find((url) => /^https:\/\/(?:music\.apple\.com|listen\.tidal\.com|tidal\.com)\//i.test(url || ""));
+  if (linkedSource) {
+    release.musicBrainzId = group.id;
+    release.sourceUrl = linkedSource;
+    return linkedSource;
   }
   const year = group["first-release-date"]?.slice(0, 4) || release.year || "";
   const candidates = [];
@@ -707,9 +722,11 @@ async function runAcquisition(state, release) {
   try {
     sourceUrl = await resolveMusicBrainzAlbumSource(release);
   } catch (error) {
-    state.status = state.cancelRequested ? "cancelled" : "failed";
-    state.message = state.cancelRequested ? "Cancelled by user." : error.message;
-    state.finishedAt = new Date().toISOString();
+    const rateLimited = error.status === 429 || lookupRateLimitState().active;
+    state.status = state.cancelRequested ? "cancelled" : rateLimited ? "queued" : "failed";
+    state.message = state.cancelRequested ? "Cancelled by user." : rateLimited ? "Waiting for the catalogue rate limit." : error.message;
+    state.finishedAt = rateLimited ? null : new Date().toISOString();
+    if (rateLimited && !acquisitionQueue.includes(state.id)) acquisitionQueue.unshift(state.id);
     delete state.cancelRequested;
     finishAcquisition(state);
     return;
@@ -864,6 +881,10 @@ function cancelAcquisition(id) {
 
 function processAcquisitionQueue() {
   if (!initialLibraryScanComplete || activeAcquisitionId || acquisitionQueue.length === 0) return;
+  if (lookupRateLimitState().active) {
+    scheduleLookupRetry();
+    return;
+  }
   const id = acquisitionQueue.shift();
   const state = acquisitionState.get(id);
   const release = catalogueReleases.get(id);
@@ -1311,6 +1332,10 @@ const server = createServer(async (request, response) => {
       };
       catalogueReleases.set(release.id, release);
       return sendJson(response, 201, release);
+    }
+    if (testMode && url.pathname === "/api/test/rate-limit" && request.method === "POST") {
+      triggerLookupRateLimit(Number(url.searchParams.get("ms") || 500));
+      return sendJson(response, 200, lookupRateLimitState());
     }
     if (url.pathname === "/api/rescan" && request.method === "POST") {
       await scanLibrary();
