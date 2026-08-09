@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "format",
+  "name": "Format",
+  "status": "active",
+  "workspace": "/home/jake/.openclaw/workspace/services/music-browser",
+  "objective": "Deliver a dependable local-first owned-media library and complete-album player with accurate catalogue metadata and resilient playback.",
+  "authority": "reversible-local-project-work",
+  "updatedAt": "2026-08-05T18:31:20.440Z"
+}

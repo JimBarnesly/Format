@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#08090c">
-    <title>Signal — Music Library</title>
+    <title>Format — Your Physical Media, Preserved</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <aside class="sidebar">
-      <a class="brand" href="#"><span class="brand-mark">S</span><span>Signal</span></a>
+      <a class="brand" href="#"><span class="brand-mark">F</span><span>Format</span></a>
       <nav>
-        <a class="active" href="#discover" data-page-link="discover"><span>⌂</span> Discover</a>
-        <a href="#library" data-page-link="library"><span>▦</span> Library</a>
+        <a class="active" href="#discover" data-page-link="discover"><span>⌂</span> Collection</a>
+        <a href="#library" data-page-link="library"><span>▦</span> Shelf</a>
         <a href="#downloads" data-page-link="downloads"><span>↓</span> Downloads</a>
         <a href="http://192.168.68.60:4533/" target="_blank"><span>◉</span> Navidrome</a>
       </nav>
@@ -24,7 +24,7 @@
 
     <main>
       <header>
-        <div class="mobile-brand"><span class="brand-mark">S</span> Signal</div>
+        <div class="mobile-brand"><span class="brand-mark">F</span> Format</div>
         <label class="search">
           <span>⌕</span>
           <input id="search" type="search" placeholder="Search artists, albums, songs, genres…">
@@ -47,9 +47,9 @@
         <div class="hero-art" id="hero-art"></div>
         <div class="hero-shade"></div>
         <div class="hero-content">
-          <span class="eyebrow">FROM YOUR LIBRARY</span>
-          <h1 id="hero-title">Your music, on your network.</h1>
-          <p id="hero-copy">Browse the collection and find the next thing worth hearing.</p>
+          <span class="eyebrow">YOUR PHYSICAL MEDIA, PRESERVED</span>
+          <h1 id="hero-title">Choose it from the shelf. Play it as a whole.</h1>
+          <p id="hero-copy">Back up records, tapes and CDs without reducing them to a pile of random tracks.</p>
           <div class="hero-actions">
             <button id="hero-play" class="primary">▶ Play album</button>
             <button id="hero-info" class="secondary">View tracks</button>
@@ -93,8 +93,9 @@
 
       <div id="page-library" class="page">
         <section class="shelf page-heading-shelf">
-          <div class="section-heading"><div><span class="eyebrow">ON THIS GATEWAY</span><h2>Your library</h2><p>Albums available to play locally.</p></div></div>
-          <div id="albums" class="cards"></div>
+          <div class="section-heading"><div><span class="eyebrow">YOUR FORMAT SHELF</span><h2>Your collection</h2><p>Complete albums, ordered by artist and original release.</p></div></div>
+          <div id="albums" class="cover-flow" tabindex="0" aria-label="Album cover flow"></div>
+          <nav id="library-alpha-jump" class="library-alpha-jump" aria-label="Jump to artist"></nav>
         </section>
       </div>
 
@@ -105,18 +106,24 @@
           <span id="downloader-state" class="downloader-state"><i></i> Worker online</span>
         </div>
         <div id="active-download" class="active-download hidden"></div>
+        <div class="download-column shadow-albums-column">
+          <div class="download-column-heading"><h3>Shadow albums</h3><span id="shadow-total">0 albums</span></div>
+          <p class="source-note">Albums stay here until every track has been identified and validated.</p>
+          <div id="shadow-albums" class="download-list"></div>
+        </div>
         <div class="download-columns">
           <div class="download-column">
             <div class="download-column-heading"><h3>Queue</h3><span id="queue-total">0 albums</span></div>
             <div id="download-queue" class="download-list"></div>
           </div>
           <div class="download-column">
-            <div class="download-column-heading"><h3>History</h3><span id="history-total">0 albums</span></div>
+            <div class="download-column-heading"><h3>History</h3><span id="history-total">0 albums</span><button id="clear-download-history" class="refresh-button" type="button">Clear</button></div>
             <div id="download-history" class="download-list"></div>
           </div>
         </div>
       </section>
       </div>
+
     </main>
 
     <dialog id="album-dialog">
@@ -129,16 +136,42 @@
         <div class="dialog-actions">
           <button id="dialog-play" class="primary">▶ Play album</button>
           <a id="dialog-download" class="secondary" href="#" download>↓ Download album</a>
+          <button id="dialog-edit" class="secondary" type="button">Edit metadata</button>
           <button id="dialog-delete" class="danger-button" type="button">Delete album</button>
         </div>
         <div id="dialog-tracks" class="track-list"></div>
       </div>
     </dialog>
 
+    <dialog id="repair-review-dialog" class="repair-review-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <div class="dialog-body">
+        <span class="eyebrow">MUSICBRAINZ COMPARISON</span>
+        <h2 id="repair-review-title">Album review</h2>
+        <p id="repair-review-release"></p>
+        <div class="repair-legend"><span class="match">Match</span><span class="mismatch">Check</span><span class="missing">Missing</span></div>
+        <div id="repair-review-tracks" class="repair-review-tracks"></div>
+        <h3 id="repair-review-extras-title" class="hidden">Extra local files</h3>
+        <div id="repair-review-extras" class="repair-review-tracks"></div>
+      </div>
+    </dialog>
+
+    <section id="turntable-stage" class="turntable-stage" aria-hidden="true">
+      <div class="turntable-deck">
+        <div class="turntable-platter"></div>
+        <div class="turntable-spindle"></div>
+        <div id="turntable-cover" class="turntable-cover">
+          <span class="turntable-fallback"><strong></strong><small></small></span>
+        </div>
+      </div>
+      <p id="turntable-caption"></p>
+      <small>Scroll, use an arrow key, or press Escape to return to the library</small>
+    </section>
+
     <footer class="player">
       <div class="now-playing">
         <div id="player-cover" class="mini-cover"></div>
-        <div><strong id="player-title">Nothing playing</strong><small id="player-artist">Choose a track</small></div>
+        <div><strong id="player-title">Nothing playing</strong><small id="player-artist">Choose a track</small><small id="player-album"></small></div>
       </div>
       <div class="transport">
         <div class="transport-buttons">

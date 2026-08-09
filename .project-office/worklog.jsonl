@@ -1,0 +1,20 @@
+{"at":"2026-08-05T06:40:45.303Z","type":"reconcile","task_id":null,"text":"Office state reconciled idempotently.","evidence":null}
+{"at":"2026-08-05T06:52:15.434Z","type":"dispatched","task_id":"format-2173ed1263","text":"worker process 3505 dispatched for Verify library ingestion integrity.","evidence":{"pid":3505}}
+{"at":"2026-08-05T06:52:15.484Z","type":"work-started","task_id":"format-2173ed1263","text":"format-quality-release-director started Verify library ingestion integrity.","evidence":null}
+{"at":"2026-08-05T06:52:32.194Z","type":"run-failed","task_id":"format-2173ed1263","text":"worker failed for Verify library ingestion integrity.","evidence":{"exit":1,"usageLimited":false}}
+{"at":"2026-08-05T06:58:46.940Z","type":"dispatched","task_id":"format-2173ed1263","text":"worker process 9729 dispatched for Verify library ingestion integrity.","evidence":{"pid":9729}}
+{"at":"2026-08-05T06:58:46.960Z","type":"dispatched","task_id":"format-1c572b8001","text":"worker process 9743 dispatched for Audit complete-album playback path.","evidence":{"pid":9743}}
+{"at":"2026-08-05T06:58:47.034Z","type":"work-started","task_id":"format-2173ed1263","text":"format-quality-release-director started Verify library ingestion integrity.","evidence":null}
+{"at":"2026-08-05T06:58:47.220Z","type":"work-started","task_id":"format-1c572b8001","text":"format-engineering-director started Audit complete-album playback path.","evidence":null}
+{"at":"2026-08-05T07:05:18.461Z","type":"run-failed","task_id":"format-1c572b8001","text":"worker failed for Audit complete-album playback path.","evidence":{"exit":143,"usageLimited":false}}
+{"at":"2026-08-05T07:11:09.436Z","type":"dispatched","task_id":"format-1c572b8001","text":"worker process 2460 dispatched for Audit complete-album playback path.","evidence":{"pid":2460}}
+{"at":"2026-08-05T07:11:09.571Z","type":"work-started","task_id":"format-1c572b8001","text":"format-engineering-director started Audit complete-album playback path.","evidence":null}
+{"at":"2026-08-05T07:21:43.623Z","type":"lease-recovered","task_id":"format-2173ed1263","text":"Recovered expired lease for Verify library ingestion integrity.","evidence":null}
+{"at":"2026-08-05T07:21:43.635Z","type":"lease-recovered","task_id":"format-1c572b8001","text":"Recovered expired lease for Audit complete-album playback path.","evidence":null}
+{"at":"2026-08-05T07:37:20.535Z","type":"dispatched","task_id":"format-2173ed1263","text":"worker process 2073 dispatched for Verify library ingestion integrity.","evidence":{"pid":2073}}
+{"at":"2026-08-05T07:37:20.589Z","type":"work-started","task_id":"format-2173ed1263","text":"format-quality-release-director started Verify library ingestion integrity.","evidence":null}
+{"at":"2026-08-05T07:52:46.929Z","type":"lease-recovered","task_id":"format-2173ed1263","text":"Recovered expired lease for Verify library ingestion integrity.","evidence":null}
+{"at":"2026-08-05T12:07:00.206Z","type":"reconcile","task_id":null,"text":"Office state reconciled idempotently.","evidence":null}
+{"at":"2026-08-05T12:31:00.111Z","type":"reconcile","task_id":null,"text":"Office state reconciled idempotently.","evidence":null}
+{"at":"2026-08-05T18:07:00.191Z","type":"reconcile","task_id":null,"text":"Office state reconciled idempotently.","evidence":null}
+{"at":"2026-08-05T18:31:20.440Z","type":"reconcile","task_id":null,"text":"Office state reconciled idempotently.","evidence":null}

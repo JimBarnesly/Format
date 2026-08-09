@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Format Player
+Comment=Touchscreen Format physical-media player
+Exec=@LAUNCHER@
+Terminal=false
+X-GNOME-Autostart-enabled=true

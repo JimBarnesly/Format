@@ -1,0 +1,7 @@
+[Unit]
+Description=Automatically correct music metadata with MusicBrainz Picard
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/user/%U/signal-metadata-automation.lock /usr/bin/node /home/jake/.openclaw/workspace/services/music-browser/metadata-automation.mjs

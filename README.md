@@ -1,6 +1,9 @@
-# Gateway music browser
+# Format
 
-Stremio-style local frontend for the gateway music library.
+Format is an open-source, local-first library for backing up owned physical
+media while preserving the experience of choosing a complete work from a
+shelf and playing it in its intended order. Records, tapes, CDs and digital
+files are formats of the work—not a source for a random-track feed.
 
 - Scans real audio metadata below `/home/jake/Music`.
 - Streams audio with range request support.
@@ -22,9 +25,30 @@ npm start
 
 Open `http://192.168.68.60:4534/`.
 
+Keyboard playback follows the useful YouTube conventions: `Space`/`K`
+toggles playback, `J`/`L` selects the previous/next track, `M` toggles mute,
+up/down changes volume, `0`–`9` seeks by percentage, `Home`/`End` seeks to the
+ends, and `F` toggles fullscreen. On the Library page left/right remains
+reserved for moving through Cover Flow and Enter plays the centred album.
+
+## Raspberry Pi 4B touchscreen player
+
+The `player/rpi4` bundle configures Raspberry Pi OS Bookworm Desktop as a
+full-screen Format player using the Pi's default USB or I2S DAC. See
+`player/rpi4/README.md` for installation and audio-output checks. The music
+library and Format service remain on this gateway.
+
+The Metadata page links to MusicBrainz Picard Web at
+`http://192.168.68.60:8086/`. A separate Picard instance checks for new album
+folders every five minutes and rechecks the complete library every 24
+hours. It clusters and looks up tags first, falls back to acoustic scanning,
+and saves matched files only. Ambiguous files remain untouched for manual
+review in Picard Web. Both Picard containers mount `/home/jake/Music`
+read-write; Format and Navidrome remain read-only consumers.
+
 ## Reliability baseline
 
-Signal follows the useful core behaviours established by Lidarr, Navidrome,
+Format follows the useful core behaviours established by Lidarr, Navidrome,
 MusicBrainz and Subsonic-style music servers:
 
 - metadata-driven artist, album and track indexing;
@@ -35,6 +59,21 @@ MusicBrainz and Subsonic-style music servers:
 - quality-first provider fallback without overwriting existing files;
 - verified completion: a zero exit code alone never marks an album complete;
 - safe file/path handling and recoverable deletion.
+
+## Shadow library
+
+Format keeps one persistent shadow record for every detected or requested
+album. New downloads remain in isolated staging and incomplete albums remain
+outside the playable carousel. An album is published only after its selected
+MusicBrainz release has an authoritative track manifest and every manifest
+entry maps to a validated local file.
+
+The Downloads page reads the shadow records directly and exposes their track
+manifests. Legacy track totals are never sufficient proof for deletion, and
+duplicate removal is report-only until two files are confirmed to represent
+the same MusicBrainz recording. Automatic shadow repair is controlled by
+`SHADOW_REPAIR_ENABLED=true`; leave it disabled while auditing a migrated
+library.
 
 MusicBrainz calls are proactively paced above one request per second and use a
 versioned application User-Agent. Future quality upgrades must stage and inspect

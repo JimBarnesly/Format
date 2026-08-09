@@ -1,0 +1,23 @@
+[Unit]
+Description=Format loopback operator service
+After=gateway-music-browser.service
+Requires=gateway-music-browser.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jake/.openclaw/workspace/services/music-browser
+LoadCredential=signal-operator-token
+Environment=OPERATOR_HOST=127.0.0.1
+Environment=OPERATOR_PORT=4535
+Environment=OPERATOR_MUTATIONS_ENABLED=false
+ExecStartPre=/usr/bin/node /home/jake/.openclaw/workspace/services/music-browser/operator-credential-check.mjs
+ExecStart=/usr/bin/node /home/jake/.openclaw/workspace/services/music-browser/operator-runtime.mjs
+Restart=no
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/gateway-music-browser
+
+[Install]
+WantedBy=default.target

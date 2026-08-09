@@ -3,6 +3,7 @@
   "corrections": [
     {
       "sha256": "e255d80cf0cb8a02d724d85f67c3102f8e38753ca8de826c4b514f81c790d578",
+      "sourceRelativePath": "Sola Rosa/Haunted Out-Takes/06. Awish.flac",
       "reason": "Provider misidentified Sola Rosa — The Ace of Space as Awish",
       "artist": "Sola Rosa",
       "albumArtist": "Sola Rosa",
@@ -14,6 +15,76 @@
       "disc": "1",
       "discTotal": "1",
       "relativePath": "SpotiFLAC/Sola Rosa/Get It Together/[2009] Get It Together/01. The Ace of Space.flac"
+    },
+    {
+      "sha256": "86ba9839a398a8d35c0aeb850ff32e4506ffd3a86e5998a86b7c4ab2f38de8bb",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2016] Sabbath Bloody Sabbath/Sabbath Bloody Sabbath (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Sabbath Bloody Sabbath (2009 - Remaster)", "date": "2009", "track": "1", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/01. Sabbath Bloody Sabbath (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "d09021a0a22ecb2b041d7e7037f999db8649db6283831285b5b853d4c454b331",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/A National Acrobat (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "A National Acrobat (2009 - Remaster)", "date": "2009", "track": "2", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/02. A National Acrobat (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "ceb64451a4e3227449d3b3116b53e039b63521effde638bcdb865430d826bb1c",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Fluff (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Fluff (2009 - Remaster)", "date": "2009", "track": "3", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/03. Fluff (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "90a442dc38e8e3c32410e9fbef8515cf78eec37c9ac5de0e3813cccda5319c44",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Sabbra Cadabra (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Sabbra Cadabra (2009 - Remaster)", "date": "2009", "track": "4", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/04. Sabbra Cadabra (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "d1f292309051eb79dd10f27353ab2ba0839a00c39bb11f6047f2a70c5f672711",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Killing Yourself to Live (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Killing Yourself to Live (2009 - Remaster)", "date": "2009", "track": "5", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/05. Killing Yourself to Live (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "1aa7ce690afb42951184b8dd234ddc529d50da45aec8168e64caca36a778088a",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Who Are You (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Who Are You? (2009 - Remaster)", "date": "2009", "track": "6", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/06. Who Are You? (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "0208ec960ee0b66cc7b7d490d696731945c652e52c0d4fab80680e454b6b48f7",
+      "sourceRelativePath": "Black Sabbath/Sabbath Bloody Sabbath/Looking for Today (Remastered 2009) - Black Sabbath.flac",
+      "reason": "Consolidate the prior partial Black Sabbath — Sabbath Bloody Sabbath copy",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Looking for Today (2009 - Remaster)", "date": "2009", "track": "7", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/07. Looking for Today (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "b33d7db70c41446cb5f324f434def2a15ccc7bce7fa1761e7aedaf37e78c1e00",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Looking for Today (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Looking for Today (2009 - Remaster)", "date": "2009", "track": "7", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/07. Looking for Today (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "27a714f8086fb1ed5ab0e20aa15aee1ef528368668029f05e9f240578f4d17d5",
+      "sourceRelativePath": "Black Sabbath/Sabbath Bloody Sabbath/Spiral Architect (Remastered 2009) - Black Sabbath.flac",
+      "reason": "Consolidate the prior partial Black Sabbath — Sabbath Bloody Sabbath copy",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Spiral Architect (2009 - Remaster)", "date": "2009", "track": "8", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/08. Spiral Architect (2009 - Remaster).flac"
+    },
+    {
+      "sha256": "200ed38c4d2a775857f5081577552db6f638be5a64049518e280b0ba52e94816",
+      "sourceRelativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2017] Sabbath Bloody Sabbath/Spiral Architect (2009 - Remaster).flac",
+      "reason": "Provider returned compilation track numbering for Black Sabbath — Sabbath Bloody Sabbath",
+      "artist": "Black Sabbath", "albumArtist": "Black Sabbath", "album": "Sabbath Bloody Sabbath", "title": "Spiral Architect (2009 - Remaster)", "date": "2009", "track": "8", "trackTotal": "8", "disc": "1", "discTotal": "1",
+      "relativePath": "SpotiFLAC/Black Sabbath/Sabbath Bloody Sabbath/[2009] Sabbath Bloody Sabbath/08. Spiral Architect (2009 - Remaster).flac"
     }
   ]
 }

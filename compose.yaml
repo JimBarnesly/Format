@@ -1,5 +1,6 @@
 services:
   music-browser:
+    profiles: ["containerized-browser"]
     build: .
     container_name: gateway-music-browser
     restart: unless-stopped
@@ -18,3 +19,21 @@ services:
       - /home/jake/Music:/music:ro
       - /home/jake/.cache/gateway-music-browser:/cache
       - /home/jake/.local/share/gateway-music-browser:/data
+
+  picard-web:
+    image: aandree5/picard-web:latest
+    container_name: gateway-picard-web
+    restart: unless-stopped
+    ports:
+      - "192.168.68.60:8086:5000"
+    volumes:
+      - /home/jake/.local/share/picard-web:/picard-web:rw
+      - /home/jake/Music:/music:rw
+
+  picard-automation:
+    image: aandree5/picard-web:latest
+    container_name: gateway-picard-automation
+    restart: unless-stopped
+    volumes:
+      - /home/jake/.local/share/picard-automation:/picard-web:rw
+      - /home/jake/Music:/music:rw
