@@ -9,7 +9,7 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
-import { publishedMediaPath } from "./published-media-policy.mjs";
+import { openPublishedMedia } from "./published-media-policy.mjs";
 import {
   authoritativeExpectedTrackCount,
   authoritativeManifestEntries,
@@ -2397,35 +2397,40 @@ async function prepareFeaturedRecommendations() {
 }
 
 async function coverFor(id, response) {
-  const source = publishedMediaPath(id, library.tracks, root);
-  if (!source || !existsSync(source)) return sendJson(response, 404, { error: "Track not found" });
-  await mkdir(cacheDir, { recursive: true });
-  const cacheName = `${Buffer.from(id).toString("base64url")}.jpg`;
-  const target = join(cacheDir, cacheName);
-  if (!existsSync(target)) {
-    try {
-      await execFileAsync("ffmpeg", ["-v", "error", "-i", source, "-an", "-frames:v", "1", "-y", target]);
-    } catch {
-      return sendJson(response, 404, { error: "Cover not found" });
+  const source = await openPublishedMedia(id, library.tracks, root);
+  if (!source) return sendJson(response, 404, { error: "Track not found" });
+  try {
+    await mkdir(cacheDir, { recursive: true });
+    const cacheName = `${Buffer.from(id).toString("base64url")}.jpg`;
+    const target = join(cacheDir, cacheName);
+    if (!existsSync(target)) {
+      try {
+        await execFileAsync("ffmpeg", ["-v", "error", "-i", `/proc/${process.pid}/fd/${source.fd}`, "-an", "-frames:v", "1", "-y", target]);
+      } catch {
+        return sendJson(response, 404, { error: "Cover not found" });
+      }
     }
+    response.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=86400" });
+    createReadStream(target).pipe(response);
+  } finally {
+    await source.close();
   }
-  response.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=86400" });
-  createReadStream(target).pipe(response);
 }
 
 async function streamAudio(id, request, response) {
-  const path = publishedMediaPath(id, library.tracks, root);
-  if (!path || !existsSync(path)) return sendJson(response, 404, { error: "Track not found" });
-  const info = await stat(path);
+  const source = await openPublishedMedia(id, library.tracks, root);
+  if (!source) return sendJson(response, 404, { error: "Track not found" });
+  const info = await source.stat();
   const range = request.headers.range;
   const contentTypes = { ".flac": "audio/flac", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav" };
-  const contentType = contentTypes[extname(path).toLowerCase()] || "application/octet-stream";
+  const contentType = contentTypes[extname(id).toLowerCase()] || "application/octet-stream";
   if (!range) {
     response.writeHead(200, { "content-type": contentType, "content-length": info.size, "accept-ranges": "bytes" });
-    return createReadStream(path).pipe(response);
+    return source.createReadStream().pipe(response);
   }
   const match = /^bytes=(\d+)-(\d*)$/.exec(range);
   if (!match) {
+    await source.close();
     response.writeHead(416, { "content-range": `bytes */${info.size}` });
     return response.end();
   }
@@ -2433,6 +2438,7 @@ async function streamAudio(id, request, response) {
   const start = Number(startText);
   const end = endText ? Math.min(Number(endText), info.size - 1) : info.size - 1;
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= info.size) {
+    await source.close();
     response.writeHead(416, { "content-range": `bytes */${info.size}` });
     return response.end();
   }
@@ -2442,7 +2448,7 @@ async function streamAudio(id, request, response) {
     "content-range": `bytes ${start}-${end}/${info.size}`,
     "accept-ranges": "bytes"
   });
-  createReadStream(path, { start, end }).pipe(response);
+  source.createReadStream({ start, end }).pipe(response);
 }
 
 const server = createServer(async (request, response) => {
