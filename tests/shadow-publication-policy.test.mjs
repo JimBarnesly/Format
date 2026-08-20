@@ -142,8 +142,30 @@ test("direct identification uses declared medium totals rather than manifest len
     { "track-count": 1, tracks: [] }
   ]), 3);
   assert.equal(authoritativeExpectedTrackCount([{ tracks: [{ position: 1 }] }]), null);
+  assert.equal(authoritativeExpectedTrackCount([{ "track-count": "1", tracks: [{ position: 1 }] }]), null);
+  assert.equal(authoritativeExpectedTrackCount([{ "track-count": true, tracks: [{ position: 1 }] }]), null);
   assert.match(serverSource, /const expectedTrackCount = authoritativeExpectedTrackCount\(selected\.media\)/);
   assert.match(serverSource, /existing: \{ \.\.\.record, authoritative: true, expectedTrackCount \},[\s\S]*authoritativeManifest: manifest/);
+});
+
+test("authoritative track positions must form contiguous discs and tracks", () => {
+  const base = { authoritative: true, source: "acquisition", expectedTrackCount: 1 };
+  for (const authoritativeManifest of [
+    [{ disc: 1, position: 2, title: "Missing first track", localTrackId: "a", status: "validated" }],
+    [{ disc: 2, position: 1, title: "Missing first disc", localTrackId: "a", status: "validated" }]
+  ]) {
+    assert.equal(shadowPublicationState({ existing: base, authoritativeManifest }).published, false);
+  }
+
+  const valid = shadowPublicationState({
+    existing: { ...base, expectedTrackCount: 3 },
+    authoritativeManifest: [
+      { disc: 1, position: 1, title: "One", localTrackId: "a", status: "validated" },
+      { disc: 1, position: 2, title: "Two", localTrackId: "b", status: "validated" },
+      { disc: 2, position: 1, title: "Three", localTrackId: "c", status: "validated" }
+    ]
+  });
+  assert.equal(valid.published, true);
 });
 
 test("authoritative publication exposes only validated manifest tracks", () => {

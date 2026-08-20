@@ -22,6 +22,7 @@ function authoritativeManifestComplete(manifest, expectedTrackCount) {
   if (entries.length !== expectedTrackCount) return false;
   const positions = new Set();
   const localTrackIds = new Set();
+  const positionsByDisc = new Map();
   for (const entry of entries) {
     if (entry.status !== "validated"
       || !Number.isInteger(entry.disc) || entry.disc < 1
@@ -32,6 +33,16 @@ function authoritativeManifestComplete(manifest, expectedTrackCount) {
     if (positions.has(position) || localTrackIds.has(entry.localTrackId)) return false;
     positions.add(position);
     localTrackIds.add(entry.localTrackId);
+    if (!positionsByDisc.has(entry.disc)) positionsByDisc.set(entry.disc, new Set());
+    positionsByDisc.get(entry.disc).add(entry.position);
+  }
+  const discCount = Math.max(...positionsByDisc.keys());
+  for (let disc = 1; disc <= discCount; disc += 1) {
+    const discPositions = positionsByDisc.get(disc);
+    if (!discPositions) return false;
+    for (let position = 1; position <= discPositions.size; position += 1) {
+      if (!discPositions.has(position)) return false;
+    }
   }
   return true;
 }
@@ -40,7 +51,7 @@ export function authoritativeExpectedTrackCount(media) {
   if (!Array.isArray(media) || media.length === 0) return null;
   let total = 0;
   for (const medium of media) {
-    const count = Number(medium?.["track-count"]);
+    const count = medium?.["track-count"];
     if (!Number.isInteger(count) || count < 1) return null;
     total += count;
   }
