@@ -15,6 +15,7 @@ export function createPlaybackContinuity({
   let generation = 0;
   let networkAttempts = 0;
   let mediaAttempts = 0;
+  let mediaRetryPending = false;
   let pendingRetry = null;
 
   const clearPendingRetry = () => {
@@ -22,13 +23,16 @@ export function createPlaybackContinuity({
     pendingRetry = null;
   };
 
-  const scheduleRetry = (delay) => {
+  const scheduleRetry = (delay, beforeRetry = () => {}) => {
     clearPendingRetry();
     const expectedGeneration = generation;
     const expectedTrackId = currentTrackId;
     pendingRetry = schedule(() => {
       pendingRetry = null;
-      if (generation === expectedGeneration && currentTrackId === expectedTrackId) retry(expectedTrackId);
+      if (generation === expectedGeneration && currentTrackId === expectedTrackId) {
+        beforeRetry();
+        retry(expectedTrackId);
+      }
     }, delay);
   };
 
@@ -40,12 +44,14 @@ export function createPlaybackContinuity({
       currentSource = source;
       networkAttempts = 0;
       mediaAttempts = 0;
+      mediaRetryPending = false;
       report("");
     },
 
     handleError({ code, source }) {
       if (!currentTrackId || source !== currentSource || code === 1) return;
       if (code === 2) {
+        mediaRetryPending = false;
         const delay = networkRetryDelays[Math.min(networkAttempts, networkRetryDelays.length - 1)];
         networkAttempts += 1;
         report(`Connection interrupted. Retrying this track in ${Math.ceil(delay / 1000)}s…`);
@@ -53,10 +59,14 @@ export function createPlaybackContinuity({
         return;
       }
 
+      if (mediaRetryPending) return;
       if (mediaAttempts === 0) {
-        mediaAttempts += 1;
+        mediaRetryPending = true;
         report("This track did not load. Retrying once…");
-        scheduleRetry(mediaRetryDelay);
+        scheduleRetry(mediaRetryDelay, () => {
+          mediaRetryPending = false;
+          mediaAttempts += 1;
+        });
         return;
       }
 
@@ -73,6 +83,7 @@ export function createPlaybackContinuity({
       if (source !== currentSource) return;
       clearPendingRetry();
       networkAttempts = 0;
+      mediaRetryPending = false;
       report("");
     },
 
@@ -80,5 +91,30 @@ export function createPlaybackContinuity({
       clearPendingRetry();
       generation += 1;
     }
+  };
+}
+
+export function createPlaybackStatusAnnouncer({
+  render,
+  schedule = setTimeout,
+  cancel = clearTimeout,
+  minimumMs = 4000
+}) {
+  let message = "";
+  let clearTimer = null;
+
+  return (nextMessage) => {
+    if (!nextMessage) {
+      if (!message) render("");
+      return;
+    }
+    if (clearTimer !== null) cancel(clearTimer);
+    message = nextMessage;
+    render(message);
+    clearTimer = schedule(() => {
+      clearTimer = null;
+      message = "";
+      render("");
+    }, minimumMs);
   };
 }

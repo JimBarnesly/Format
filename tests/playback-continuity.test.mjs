@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createPlaybackContinuity } from "../public/playback-continuity.js";
+import { createPlaybackContinuity, createPlaybackStatusAnnouncer } from "../public/playback-continuity.js";
 
 function harness(options = {}) {
   const scheduled = [];
@@ -74,26 +74,46 @@ test("an unreadable track is retried once then skipped when another track exists
   assert.match(reports.at(-1), /skipping/i);
 });
 
+test("duplicate errors cannot skip a track before its retry executes", () => {
+  const { controller, scheduled, retries, advances } = harness();
+  controller.trackChanged("track-1", "/audio/1");
+
+  controller.handleError({ code: 3, source: "/audio/1" });
+  controller.handleError({ code: 3, source: "/audio/1" });
+
+  assert.equal(scheduled.length, 1);
+  assert.deepEqual(retries, []);
+  assert.deepEqual(advances, []);
+  scheduled[0].callback();
+  assert.deepEqual(retries, ["track-1"]);
+  controller.handleError({ code: 3, source: "/audio/1" });
+  assert.deepEqual(advances, [true]);
+});
+
 test("skip status survives the synchronous switch to the next track", () => {
   const reports = [];
+  let executeRetry;
   let controller;
   controller = createPlaybackContinuity({
     retry: () => {},
     hasNext: () => true,
     report: (message) => reports.push(message),
-    advance: () => controller.trackChanged("track-2", "/audio/2")
+    advance: () => controller.trackChanged("track-2", "/audio/2"),
+    schedule: (callback) => { executeRetry = callback; return callback; }
   });
   controller.trackChanged("track-1", "/audio/1");
   controller.handleError({ code: 3, source: "/audio/1" });
+  executeRetry();
   controller.handleError({ code: 3, source: "/audio/1" });
 
   assert.match(reports.at(-1), /skipping/i);
 });
 
 test("an unreadable final track stops with a useful message", () => {
-  const { controller, advances, reports } = harness({ hasNext: false });
+  const { controller, scheduled, advances, reports } = harness({ hasNext: false });
   controller.trackChanged("track-1", "/audio/1");
   controller.handleError({ code: 4, source: "/audio/1" });
+  scheduled[0].callback();
   controller.handleError({ code: 4, source: "/audio/1" });
 
   assert.deepEqual(advances, []);
@@ -138,4 +158,26 @@ test("a corrupt track that briefly becomes playable is still skipped after its r
   controller.handleError({ code: 3, source: "/audio/1" });
 
   assert.deepEqual(advances, [true]);
+});
+
+test("playback announcements remain visible long enough for assistive technology", () => {
+  const rendered = [];
+  const scheduled = [];
+  const announce = createPlaybackStatusAnnouncer({
+    render: (message) => rendered.push(message),
+    schedule: (callback, delay) => {
+      const task = { callback, delay, cancelled: false };
+      scheduled.push(task);
+      return task;
+    },
+    cancel: (task) => { task.cancelled = true; }
+  });
+
+  announce("Skipping an unreadable track…");
+  announce("");
+
+  assert.equal(rendered.at(-1), "Skipping an unreadable track…");
+  assert.equal(scheduled.at(-1).delay, 4000);
+  scheduled.at(-1).callback();
+  assert.equal(rendered.at(-1), "");
 });

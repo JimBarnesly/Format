@@ -1,4 +1,4 @@
-import { createPlaybackContinuity } from "./playback-continuity.js";
+import { createPlaybackContinuity, createPlaybackStatusAnnouncer } from "./playback-continuity.js";
 
 const state = { library: null, queue: [], index: -1, album: null, playingAlbum: null, playingArtworkUrl: null };
 let coverFlowCleanup = () => {};
@@ -7,17 +7,27 @@ let enterLibraryAtAlbum = () => {};
 let turntableTimer = 0;
 let libraryIdleTimer = 0;
 const $ = (selector) => document.querySelector(selector);
-const audio = $("#audio");
+let audio = $("#audio");
+const announcePlaybackStatus = createPlaybackStatusAnnouncer({
+  render: (message) => { $("#player-status").textContent = message; }
+});
 const playbackContinuity = createPlaybackContinuity({
   retry: (trackId) => {
     if (state.queue[state.index] !== trackId) return;
     audio.load();
-    void audio.play().catch(() => {});
+    requestPlayback();
   },
   advance: () => nextTrack(),
   hasNext: () => state.index < state.queue.length - 1,
-  report: (message) => { $("#player-status").textContent = message; }
+  report: announcePlaybackStatus
 });
+
+function requestPlayback(element = audio) {
+  void element.play().catch((error) => {
+    if (element !== audio || error?.name === "AbortError") return;
+    announcePlaybackStatus("Playback could not start automatically. Press play to continue.");
+  });
+}
 const pages = new Set(["discover", "library", "downloads"]);
 let lookupRateLimit = { active: false, until: null, remainingMs: 0 };
 const acquisitionBadges = new Map();
@@ -188,6 +198,7 @@ function playTrackIds(ids, start = 0, album = null, sourceCard = null) {
 function loadCurrent(autoplay = false) {
   const track = getTrack(state.queue[state.index]);
   if (!track) return;
+  replaceAudioElement();
   audio.src = `/api/audio?id=${encodeURIComponent(track.id)}`;
   playbackContinuity.trackChanged(track.id, audio.src);
   $("#player-title").textContent = track.title;
@@ -195,12 +206,12 @@ function loadCurrent(autoplay = false) {
   $("#player-album").textContent = track.album || state.playingAlbum?.title || "";
   $("#turntable-caption").textContent = track.title;
   $("#player-cover").style.backgroundImage = `url("${coverUrl(track.id)}")`;
-  if (autoplay) audio.play();
+  if (autoplay) requestPlayback();
 }
 
 function togglePlayback() {
   if (!audio.src) return;
-  if (audio.paused) audio.play();
+  if (audio.paused) requestPlayback();
   else audio.pause();
 }
 
@@ -1271,29 +1282,55 @@ window.addEventListener("keydown", (event) => {
     else document.documentElement.requestFullscreen?.();
   }
 }, { capture: true });
-audio.onplay = () => {
-  $("#toggle").textContent = "Ⅱ";
-  $("#turntable-stage").classList.remove("paused");
-  scheduleTurntableReturn();
-};
-audio.onpause = () => {
-  $("#toggle").textContent = "▶";
-  $("#turntable-stage").classList.add("paused");
-  clearTimeout(libraryIdleTimer);
-};
-audio.ontimeupdate = () => {
-  $("#elapsed").textContent = formatTime(audio.currentTime);
-  $("#duration").textContent = formatTime(audio.duration);
-  $("#seek").value = audio.duration ? audio.currentTime / audio.duration * 100 : 0;
-};
-audio.oncanplay = () => playbackContinuity.handleSuccess(audio.currentSrc);
-audio.onerror = () => {
-  playbackContinuity.handleError({ code: audio.error?.code, source: audio.currentSrc });
-};
-audio.onended = () => {
-  if (state.index < state.queue.length - 1) { state.index++; loadCurrent(true); }
-  else dismissTurntable();
-};
+function wireAudioEvents(element) {
+  element.onplay = () => {
+    if (element !== audio) return;
+    $("#toggle").textContent = "Ⅱ";
+    $("#turntable-stage").classList.remove("paused");
+    scheduleTurntableReturn();
+  };
+  element.onpause = () => {
+    if (element !== audio) return;
+    $("#toggle").textContent = "▶";
+    $("#turntable-stage").classList.add("paused");
+    clearTimeout(libraryIdleTimer);
+  };
+  element.ontimeupdate = () => {
+    if (element !== audio) return;
+    $("#elapsed").textContent = formatTime(element.currentTime);
+    $("#duration").textContent = formatTime(element.duration);
+    $("#seek").value = element.duration ? element.currentTime / element.duration * 100 : 0;
+  };
+  element.oncanplay = () => {
+    if (element !== audio) return;
+    playbackContinuity.handleSuccess(element.currentSrc);
+  };
+  element.onerror = () => {
+    if (element !== audio) return;
+    playbackContinuity.handleError({ code: element.error?.code, source: element.currentSrc });
+  };
+  element.onended = () => {
+    if (element !== audio) return;
+    if (state.index < state.queue.length - 1) { state.index++; loadCurrent(true); }
+    else dismissTurntable();
+  };
+}
+
+function replaceAudioElement() {
+  const previous = audio;
+  const replacement = previous.cloneNode(false);
+  replacement.volume = previous.volume;
+  replacement.muted = previous.muted;
+  replacement.playbackRate = previous.playbackRate;
+  previous.replaceWith(replacement);
+  audio = replacement;
+  wireAudioEvents(audio);
+  previous.pause();
+  previous.removeAttribute("src");
+  previous.load();
+}
+
+wireAudioEvents(audio);
 for (const eventName of ["pointerdown", "wheel", "keydown"]) {
   window.addEventListener(eventName, () => {
     if (document.querySelector("#page-library.active-page") && !$("#turntable-stage").classList.contains("active")) scheduleTurntableReturn();
