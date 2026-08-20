@@ -16,7 +16,7 @@ services:
       PORT: "4534"
     volumes:
       - ./:/app:ro
-      - /home/jake/Music:/music:ro
+      - /home/jake/Music:/music:rw
       - /home/jake/.cache/gateway-music-browser:/cache
       - /home/jake/.local/share/gateway-music-browser:/data
 

@@ -10,13 +10,40 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install media tools
+      - name: Install host media tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Verify repository
         run: npm run verify
+      - name: Build release image
+        run: docker build --tag format:verify .
+      - name: Verify release image toolchain and tests
+        run: |
+          docker run --rm --user 1000:1000 format:verify npm run verify
+          docker run --rm format:verify ffmpeg -version
+          docker run --rm format:verify ffprobe -version
+          docker run --rm format:verify spotiflac --help
+      - name: Smoke and restart release image as non-root
+        run: |
+          set -euo pipefail
+          docker run --detach --name format-verify --publish 127.0.0.1:14534:4534 format:verify
+          trap 'docker rm --force format-verify >/dev/null 2>&1 || true' EXIT
+          test "$(docker inspect --format '{{.Config.User}}' format-verify)" = "node"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error http://127.0.0.1:14534/api/bootstrap >/dev/null; then break; fi
+            test "$attempt" -lt 10
+            sleep 2
+          done
+          docker exec --user 1000:1000 format-verify node -e 'const {writeFileSync}=require("node:fs"); writeFileSync("/cache/ci-write","ok"); writeFileSync("/data/ci-write","ok"); writeFileSync("/music/ci-write","ok")'
+          docker restart format-verify
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error http://127.0.0.1:14534/api/bootstrap >/dev/null; then break; fi
+            test "$attempt" -lt 10
+            sleep 2
+          done
+          docker exec --user 1000:1000 format-verify node -e 'const {readFileSync}=require("node:fs"); for(const path of ["/cache/ci-write","/data/ci-write","/music/ci-write"]) if(readFileSync(path,"utf8")!=="ok") process.exit(1)'

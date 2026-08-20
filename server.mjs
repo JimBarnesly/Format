@@ -32,6 +32,7 @@ const metadataCorrectionsFile = resolve(process.env.METADATA_CORRECTIONS_FILE ||
 const port = Number(process.env.PORT || 4534);
 const testMode = process.env.NODE_ENV === "test";
 const spotiflacBin = process.env.SPOTIFLAC_BIN || "spotiflac";
+const spotiflacCwd = resolve(process.env.SPOTIFLAC_CWD || process.cwd());
 const libraryScanIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_SCAN_INTERVAL_MS || 15 * 60 * 1000));
 const libraryMaintenanceIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_MAINTENANCE_INTERVAL_MS || 24 * 60 * 60 * 1000));
 const libraryProbeConcurrency = Math.max(1, Math.min(12, Number(process.env.LIBRARY_PROBE_CONCURRENCY || 6)));
@@ -1537,12 +1538,9 @@ async function runAcquisition(state, release) {
       "--use-track-numbers", "--use-artist-subfolders", "--use-album-subfolders",
       "--retries", "2", "--timeout", "120"],
     {
-      cwd: "/home/jake/.openclaw/skills/spotiflac",
+      cwd: spotiflacCwd,
       detached: true,
-      env: {
-        ...process.env,
-        PATH: `/home/jake/.local/bin:${process.env.PATH || ""}`
-      },
+      env: process.env,
       stdio: ["ignore", "pipe", "pipe"]
     }
   );

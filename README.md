@@ -25,6 +25,8 @@ npm start
 
 Open `http://192.168.68.60:4534/`.
 
+Container release checks build and run the same non-root image used for deployment. The image includes FFmpeg, ffprobe, and SpotiFLAC 0.7.0; `/music`, `/cache`, and `/data` must be writable by UID/GID 1000 when mounted. `SPOTIFLAC_BIN` and `SPOTIFLAC_CWD` may override the packaged downloader for a controlled deployment. The Compose profile mounts the owned music library read-write because completed acquisitions are published beneath `MUSIC_ROOT`.
+
 Keyboard playback follows the useful YouTube conventions: `Space`/`K`
 toggles playback, `J`/`L` selects the previous/next track, `M` toggles mute,
 up/down changes volume, `0`–`9` seeks by percentage, `Home`/`End` seeks to the
