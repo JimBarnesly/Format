@@ -9,7 +9,14 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
-import { persistedShadowManifest, safeManifestEntries, shadowPublicationState } from "./shadow-publication-policy.mjs";
+import {
+  authoritativeExpectedTrackCount,
+  authoritativeManifestEntries,
+  persistedShadowManifest,
+  publishedTrackIdsForAlbum,
+  safeManifestEntries,
+  shadowPublicationState
+} from "./shadow-publication-policy.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(process.env.MUSIC_ROOT || "/home/jake/Music");
@@ -937,8 +944,8 @@ async function reconcileShadowAlbums(scanned) {
         status: "local_unverified"
       }));
     const authoritativeUsed = new Set();
-    const authoritativeManifest = existing.authoritative && Array.isArray(existing.manifest)
-      ? safeManifestEntries(existing.manifest).map((entry) => {
+    const authoritativeManifest = existing.authoritative
+      ? authoritativeManifestEntries(existing.manifest)?.map((entry) => {
         const local = localTracks.find((track) => !authoritativeUsed.has(track.id) && entry.recordingId && track.musicBrainzRecordingId === entry.recordingId)
           || localTracks.find((track) => !authoritativeUsed.has(track.id) && track.disc === entry.disc && track.track === entry.position
             && normalized(canonicalTrackTitle(track.title)) === normalized(canonicalTrackTitle(entry.title)))
@@ -1005,8 +1012,12 @@ async function reconcileShadowAlbums(scanned) {
 }
 
 function publishedLibraryFrom(scanned) {
-  const publishedIds = new Set([...shadowAlbums.values()].filter((album) => album.published).map((album) => album.localAlbumId));
-  const publishedAlbums = scanned.albums.filter((album) => publishedIds.has(album.id));
+  const recordsByAlbumId = new Map([...shadowAlbums.values()].map((record) => [record.localAlbumId, record]));
+  const publishedAlbums = scanned.albums.flatMap((album) => {
+    const record = recordsByAlbumId.get(album.id);
+    const trackIds = publishedTrackIdsForAlbum(record, album.trackIds);
+    return trackIds.length ? [{ ...album, trackIds }] : [];
+  });
   const publishedTrackIds = new Set(publishedAlbums.flatMap((album) => album.trackIds));
   return {
     albums: publishedAlbums,
@@ -1089,7 +1100,13 @@ async function identifyShadowAlbum(id) {
         status: local ? "validated" : "missing"
       };
     }));
-    const complete = manifest.length > 0 && manifest.every((track) => track.status === "validated");
+    const expectedTrackCount = authoritativeExpectedTrackCount(selected.media);
+    const publication = shadowPublicationState({
+      existing: { ...record, authoritative: true, expectedTrackCount },
+      authoritativeManifest: manifest,
+      albumIncomplete: false,
+      testMode
+    });
     Object.assign(record, {
       authoritative: true,
       releaseGroupId: group.id,
@@ -1097,11 +1114,11 @@ async function identifyShadowAlbum(id) {
       selectedReleaseTitle: selected.title,
       selectedReleaseCountry: selected.country || null,
       originalReleaseYear: group["first-release-date"]?.slice(0, 4) || record.originalReleaseYear,
-      expectedTrackCount: manifest.length,
+      expectedTrackCount,
       localTrackCount: localTracks.length,
       manifest,
-      status: complete ? "published" : "incomplete",
-      published: complete,
+      status: publication.status,
+      published: publication.published,
       lastReconciledAt: new Date().toISOString(),
       lastError: null
     });
