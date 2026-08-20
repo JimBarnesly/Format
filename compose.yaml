@@ -15,7 +15,6 @@ services:
       LIBRARY_SCAN_INTERVAL_MS: "900000"
       PORT: "4534"
     volumes:
-      - ./:/app:ro
       - /home/jake/Music:/music:rw
       - /home/jake/.cache/gateway-music-browser:/cache
       - /home/jake/.local/share/gateway-music-browser:/data

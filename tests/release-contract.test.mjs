@@ -38,6 +38,8 @@ test("the Docker image is a non-root standalone application runtime", async () =
   assert.match(dockerfile, /mkdir -p \/music \/cache \/data[\s\S]*chown -R node:node \/music \/cache \/data/);
   assert.match(dockerfile, /^USER node\s*$/m);
   assert.match(dockerfile, /^HEALTHCHECK /m);
+  assert.match(dockerfile, /process\.env\.PORT/);
+  assert.match(dockerfile, /\$\{port\}\/api\/bootstrap/);
   assert.match(dockerfile, /^CMD \["node", "server\.mjs"\]\s*$/m);
 });
 
@@ -48,7 +50,8 @@ test("acquisition runtime paths are configurable and container music is writable
   assert.match(server, /cwd: spotiflacCwd/);
   assert.doesNotMatch(server, /\/home\/jake\/\.openclaw\/skills\/spotiflac/);
   assert.doesNotMatch(server, /\/home\/jake\/\.local\/bin/);
-  assert.match(compose, /- \/home\/jake\/Music:\/music:rw/);
+  assert.match(compose, /\/home\/jake\/Music:\/music:rw/);
+  assert.doesNotMatch(compose, /\.\/:\/app/);
 });
 
 test("Docker context excludes repository and local runtime state", async () => {

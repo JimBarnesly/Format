@@ -12,5 +12,5 @@ WORKDIR /app
 ENV MUSIC_ROOT=/music CACHE_DIR=/cache DATA_DIR=/data
 COPY --chown=node:node . .
 USER node
-HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:4534/api/bootstrap').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 CMD ["node", "-e", "const port=process.env.PORT || \"4534\"; fetch(`http://127.0.0.1:${port}/api/bootstrap`).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 CMD ["node", "server.mjs"]
