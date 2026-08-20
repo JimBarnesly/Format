@@ -9,7 +9,7 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
-import { openPublishedMedia } from "./published-media-policy.mjs";
+import { openPublishedMedia, pipeMediaStream } from "./published-media-policy.mjs";
 import {
   authoritativeExpectedTrackCount,
   authoritativeManifestEntries,
@@ -2411,7 +2411,7 @@ async function coverFor(id, response) {
       }
     }
     response.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=86400" });
-    createReadStream(target).pipe(response);
+    pipeMediaStream(createReadStream(target), response);
   } finally {
     await source.close();
   }
@@ -2426,7 +2426,7 @@ async function streamAudio(id, request, response) {
   const contentType = contentTypes[extname(id).toLowerCase()] || "application/octet-stream";
   if (!range) {
     response.writeHead(200, { "content-type": contentType, "content-length": info.size, "accept-ranges": "bytes" });
-    return source.createReadStream().pipe(response);
+    return pipeMediaStream(source.createReadStream(), response);
   }
   const match = /^bytes=(\d+)-(\d*)$/.exec(range);
   if (!match) {
@@ -2448,7 +2448,7 @@ async function streamAudio(id, request, response) {
     "content-range": `bytes ${start}-${end}/${info.size}`,
     "accept-ranges": "bytes"
   });
-  source.createReadStream({ start, end }).pipe(response);
+  pipeMediaStream(source.createReadStream({ start, end }), response);
 }
 
 const server = createServer(async (request, response) => {

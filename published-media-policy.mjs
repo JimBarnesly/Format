@@ -35,3 +35,11 @@ export async function openPublishedMedia(id, publishedTracks, root) {
     return null;
   }
 }
+
+export function pipeMediaStream(stream, response) {
+  const closeStream = () => stream.destroy();
+  response.once("close", closeStream);
+  stream.once("close", () => response.off("close", closeStream));
+  stream.pipe(response);
+  return stream;
+}

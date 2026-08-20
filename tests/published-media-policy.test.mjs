@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { once } from "node:events";
 import { test } from "node:test";
-import { openPublishedMedia, publishedMediaPath } from "../published-media-policy.mjs";
+import { openPublishedMedia, pipeMediaStream, publishedMediaPath } from "../published-media-policy.mjs";
 
 test("media access is restricted to tracks in the published projection", () => {
   const tracks = [{ id: "Visible/Album/01.flac" }];
@@ -36,6 +38,25 @@ test("published media rejects symlink escapes and keeps the verified inode open"
     await handle.close();
 
     assert.equal(await openPublishedMedia("Artist/Album/01.flac", tracks, root), null);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+test("client disconnect destroys the media stream and closes its descriptor", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "format-media-disconnect-"));
+  try {
+    const root = join(temporary, "music");
+    const track = join(root, "track.flac");
+    await mkdir(root, { recursive: true });
+    await writeFile(track, Buffer.alloc(4096));
+    const handle = await openPublishedMedia("track.flac", [{ id: "track.flac" }], root);
+    const response = new PassThrough({ highWaterMark: 1 });
+    const stream = pipeMediaStream(handle.createReadStream(), response);
+    const closed = once(stream, "close");
+    response.emit("close");
+    await closed;
+    await assert.rejects(handle.stat(), { code: "EBADF" });
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
