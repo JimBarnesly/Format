@@ -15,24 +15,28 @@ export function createPlaybackContinuity({
   let generation = 0;
   let networkAttempts = 0;
   let mediaAttempts = 0;
-  let mediaRetryPending = false;
   let pendingRetry = null;
+  let retryToken = 0;
 
   const clearPendingRetry = () => {
+    retryToken += 1;
     if (pendingRetry !== null) cancel(pendingRetry);
     pendingRetry = null;
   };
 
   const scheduleRetry = (delay, beforeRetry = () => {}) => {
     clearPendingRetry();
+    const expectedToken = retryToken;
     const expectedGeneration = generation;
     const expectedTrackId = currentTrackId;
     pendingRetry = schedule(() => {
+      if (retryToken !== expectedToken
+        || generation !== expectedGeneration
+        || currentTrackId !== expectedTrackId) return;
+      retryToken += 1;
       pendingRetry = null;
-      if (generation === expectedGeneration && currentTrackId === expectedTrackId) {
-        beforeRetry();
-        retry(expectedTrackId);
-      }
+      beforeRetry();
+      retry(expectedTrackId);
     }, delay);
   };
 
@@ -44,29 +48,23 @@ export function createPlaybackContinuity({
       currentSource = source;
       networkAttempts = 0;
       mediaAttempts = 0;
-      mediaRetryPending = false;
       report("");
     },
 
     handleError({ code, source }) {
       if (!currentTrackId || source !== currentSource || code === 1) return;
+      if (pendingRetry !== null) return;
+
       if (code === 2) {
-        mediaRetryPending = false;
         const delay = networkRetryDelays[Math.min(networkAttempts, networkRetryDelays.length - 1)];
-        networkAttempts += 1;
         report(`Connection interrupted. Retrying this track in ${Math.ceil(delay / 1000)}s…`);
-        scheduleRetry(delay);
+        scheduleRetry(delay, () => { networkAttempts += 1; });
         return;
       }
 
-      if (mediaRetryPending) return;
       if (mediaAttempts === 0) {
-        mediaRetryPending = true;
         report("This track did not load. Retrying once…");
-        scheduleRetry(mediaRetryDelay, () => {
-          mediaRetryPending = false;
-          mediaAttempts += 1;
-        });
+        scheduleRetry(mediaRetryDelay, () => { mediaAttempts += 1; });
         return;
       }
 
@@ -83,7 +81,6 @@ export function createPlaybackContinuity({
       if (source !== currentSource) return;
       clearPendingRetry();
       networkAttempts = 0;
-      mediaRetryPending = false;
       report("");
     },
 
@@ -102,16 +99,20 @@ export function createPlaybackStatusAnnouncer({
 }) {
   let message = "";
   let clearTimer = null;
+  let clearToken = 0;
 
   return (nextMessage) => {
     if (!nextMessage) {
       if (!message) render("");
       return;
     }
+    clearToken += 1;
+    const expectedToken = clearToken;
     if (clearTimer !== null) cancel(clearTimer);
     message = nextMessage;
     render(message);
     clearTimer = schedule(() => {
+      if (clearToken !== expectedToken) return;
       clearTimer = null;
       message = "";
       render("");

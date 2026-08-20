@@ -48,6 +48,21 @@ test("network retries back off and remain capped on the current track", () => {
   assert.deepEqual(scheduled.map((task) => task.delay), [1000, 3000, 10000, 10000, 10000]);
 });
 
+test("duplicate network errors coalesce until the retry executes", () => {
+  const { controller, scheduled, retries } = harness();
+  controller.trackChanged("track-1", "/audio/1");
+
+  controller.handleError({ code: 2, source: "/audio/1" });
+  controller.handleError({ code: 2, source: "/audio/1" });
+
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delay, 1000);
+  scheduled[0].callback();
+  assert.deepEqual(retries, ["track-1"]);
+  controller.handleError({ code: 2, source: "/audio/1" });
+  assert.equal(scheduled[1].delay, 3000);
+});
+
 test("an aborted load does not retry or advance playback", () => {
   const { controller, scheduled, retries, advances, reports } = harness();
   controller.trackChanged("track-1", "/audio/1");
@@ -148,6 +163,19 @@ test("successful loading clears network backoff and status", () => {
   assert.equal(scheduled.at(-1).delay, 1000);
 });
 
+test("a cancelled same-track retry callback cannot execute after success", () => {
+  const { controller, scheduled, retries } = harness();
+  controller.trackChanged("track-1", "/audio/1");
+  controller.handleError({ code: 2, source: "/audio/1" });
+  const cancelledRetry = scheduled[0];
+
+  controller.handleSuccess("/audio/1");
+  assert.equal(cancelledRetry.cancelled, true);
+  cancelledRetry.callback();
+
+  assert.deepEqual(retries, []);
+});
+
 test("a corrupt track that briefly becomes playable is still skipped after its retry", () => {
   const { controller, scheduled, advances } = harness();
   controller.trackChanged("track-1", "/audio/1");
@@ -180,4 +208,26 @@ test("playback announcements remain visible long enough for assistive technology
   assert.equal(scheduled.at(-1).delay, 4000);
   scheduled.at(-1).callback();
   assert.equal(rendered.at(-1), "");
+});
+
+test("a cancelled clear timer cannot erase a newer playback announcement", () => {
+  const rendered = [];
+  const scheduled = [];
+  const announce = createPlaybackStatusAnnouncer({
+    render: (message) => rendered.push(message),
+    schedule: (callback) => {
+      const task = { callback, cancelled: false };
+      scheduled.push(task);
+      return task;
+    },
+    cancel: (task) => { task.cancelled = true; }
+  });
+
+  announce("First status");
+  const staleClear = scheduled[0];
+  announce("Second status");
+  assert.equal(staleClear.cancelled, true);
+  staleClear.callback();
+
+  assert.equal(rendered.at(-1), "Second status");
 });

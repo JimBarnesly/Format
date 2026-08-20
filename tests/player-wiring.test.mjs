@@ -13,6 +13,7 @@ test("the browser player wires continuity recovery to media load and error event
   assert.match(app, /playbackContinuity\.handleError\(\{ code: element\.error\?\.code, source: element\.currentSrc \}\)/);
   assert.match(app, /let audio = \$\("#audio"\)/);
   assert.match(app, /function replaceAudioElement\(\)/);
+  assert.match(app, /retry: \(trackId\) => \{[\s\S]*const source = audio\.src;[\s\S]*replaceAudioElement\(\);[\s\S]*audio\.src = source;[\s\S]*requestPlayback\(\)/);
   assert.match(app, /if \(element !== audio\) return/);
   assert.match(app, /function requestPlayback\(element = audio\)/);
   assert.match(app, /void element\.play\(\)\.catch/);

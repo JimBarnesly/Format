@@ -14,7 +14,9 @@ const announcePlaybackStatus = createPlaybackStatusAnnouncer({
 const playbackContinuity = createPlaybackContinuity({
   retry: (trackId) => {
     if (state.queue[state.index] !== trackId) return;
-    audio.load();
+    const source = audio.src;
+    replaceAudioElement();
+    audio.src = source;
     requestPlayback();
   },
   advance: () => nextTrack(),
