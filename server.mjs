@@ -9,6 +9,7 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
+import { publishedMediaPath } from "./published-media-policy.mjs";
 import {
   authoritativeExpectedTrackCount,
   authoritativeManifestEntries,
@@ -2394,7 +2395,7 @@ async function prepareFeaturedRecommendations() {
 }
 
 async function coverFor(id, response) {
-  const source = safeMusicPath(id);
+  const source = publishedMediaPath(id, library.tracks, root);
   if (!source || !existsSync(source)) return sendJson(response, 404, { error: "Track not found" });
   await mkdir(cacheDir, { recursive: true });
   const cacheName = `${Buffer.from(id).toString("base64url")}.jpg`;
@@ -2411,7 +2412,7 @@ async function coverFor(id, response) {
 }
 
 async function streamAudio(id, request, response) {
-  const path = safeMusicPath(id);
+  const path = publishedMediaPath(id, library.tracks, root);
   if (!path || !existsSync(path)) return sendJson(response, 404, { error: "Track not found" });
   const info = await stat(path);
   const range = request.headers.range;
@@ -2671,7 +2672,6 @@ await loadAcquisitions();
 await loadRepairPolicy();
 await loadShadowAlbums();
 await loadFirstReleaseYears();
-await loadLibrarySnapshot();
 await loadCataloguedLibrarySnapshot();
 await loadLookupRateLimit();
 server.listen(port, "0.0.0.0", () => {

@@ -20,6 +20,11 @@ test("library reconciliation uses the fail-closed publication policy", () => {
   assert.match(serverSource, /persistedShadowManifest\(\{[\s\S]*authoritative: existing\.authoritative,[\s\S]*authoritativeManifest,[\s\S]*localManifest[\s\S]*\}\)/);
 });
 
+test("startup never serves a persisted public snapshot before revalidation", () => {
+  assert.doesNotMatch(serverSource, /^await loadLibrarySnapshot\(\);$/m);
+  assert.match(serverSource, /let library = \{ albums: \[\], tracks: \[\], updatedAt: null \}/);
+});
+
 test("a locally complete album remains unverified across repeated scans", () => {
   const first = shadowPublicationState({ existing: {}, albumIncomplete: false });
   assert.deepEqual(first, {
