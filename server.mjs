@@ -9,6 +9,7 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
+import { shadowPublicationState } from "./shadow-publication-policy.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(process.env.MUSIC_ROOT || "/home/jake/Music");
@@ -947,13 +948,12 @@ async function reconcileShadowAlbums(scanned) {
       })
       : null;
     const manifest = authoritativeManifest || localManifest;
-    const complete = authoritativeManifest
-      ? manifest.length > 0 && manifest.every((entry) => entry.status === "validated")
-      : !album.incomplete;
-    const mayPublishLegacy = existing.source === "existing-library" || testMode;
-    const status = complete
-      ? existing.authoritative || mayPublishLegacy ? "published" : "validating"
-      : existing.authoritative ? "incomplete" : album.incomplete ? "incomplete" : "validating";
+    const publication = shadowPublicationState({
+      existing,
+      authoritativeManifest,
+      albumIncomplete: album.incomplete,
+      testMode
+    });
     shadowAlbums.set(id, {
       ...existing,
       schemaVersion: 1,
@@ -961,9 +961,9 @@ async function reconcileShadowAlbums(scanned) {
       artist: album.artist,
       title: album.title,
       originalReleaseYear: album.year || null,
-      source: existing.source || "existing-library",
-      status,
-      published: status === "published",
+      source: publication.source,
+      status: publication.status,
+      published: publication.published,
       localAlbumId: album.id,
       expectedTrackCount: authoritativeManifest?.length || album.expectedTracks,
       localTrackCount: album.trackIds.length,

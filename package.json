@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check public/app.js && node --check public/playback-continuity.js && node --check acquisition-inventory.mjs && node --check operator-credential.mjs && node --check operator-credential-check.mjs && node --check operator-runtime.mjs && node --check operator-client.mjs",
+    "check": "node --check server.mjs && node --check shadow-publication-policy.mjs && node --check public/app.js && node --check public/playback-continuity.js && node --check acquisition-inventory.mjs && node --check operator-credential.mjs && node --check operator-credential-check.mjs && node --check operator-runtime.mjs && node --check operator-client.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "verify": "npm run check && npm test"
   }
