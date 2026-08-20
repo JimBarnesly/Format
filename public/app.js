@@ -1,3 +1,5 @@
+import { createPlaybackContinuity } from "./playback-continuity.js";
+
 const state = { library: null, queue: [], index: -1, album: null, playingAlbum: null, playingArtworkUrl: null };
 let coverFlowCleanup = () => {};
 let playSelectedLibraryAlbum = () => {};
@@ -6,6 +8,16 @@ let turntableTimer = 0;
 let libraryIdleTimer = 0;
 const $ = (selector) => document.querySelector(selector);
 const audio = $("#audio");
+const playbackContinuity = createPlaybackContinuity({
+  retry: (trackId) => {
+    if (state.queue[state.index] !== trackId) return;
+    audio.load();
+    void audio.play().catch(() => {});
+  },
+  advance: () => nextTrack(),
+  hasNext: () => state.index < state.queue.length - 1,
+  report: (message) => { $("#player-status").textContent = message; }
+});
 const pages = new Set(["discover", "library", "downloads"]);
 let lookupRateLimit = { active: false, until: null, remainingMs: 0 };
 const acquisitionBadges = new Map();
@@ -177,6 +189,7 @@ function loadCurrent(autoplay = false) {
   const track = getTrack(state.queue[state.index]);
   if (!track) return;
   audio.src = `/api/audio?id=${encodeURIComponent(track.id)}`;
+  playbackContinuity.trackChanged(track.id, audio.src);
   $("#player-title").textContent = track.title;
   $("#player-artist").textContent = track.artist;
   $("#player-album").textContent = track.album || state.playingAlbum?.title || "";
@@ -1272,6 +1285,10 @@ audio.ontimeupdate = () => {
   $("#elapsed").textContent = formatTime(audio.currentTime);
   $("#duration").textContent = formatTime(audio.duration);
   $("#seek").value = audio.duration ? audio.currentTime / audio.duration * 100 : 0;
+};
+audio.oncanplay = () => playbackContinuity.handleSuccess(audio.currentSrc);
+audio.onerror = () => {
+  playbackContinuity.handleError({ code: audio.error?.code, source: audio.currentSrc });
 };
 audio.onended = () => {
   if (state.index < state.queue.length - 1) { state.index++; loadCurrent(true); }

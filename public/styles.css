@@ -246,6 +246,7 @@ dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(8px); }
 .now-playing { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .now-playing strong, .now-playing small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .now-playing small { color: var(--muted); }
+#player-status:not(:empty) { color: #f2bd72; }
 .mini-cover { width: 56px; height: 56px; flex: 0 0 auto; border-radius: 7px; background: var(--soft) center/cover; }
 .transport { display: grid; gap: 6px; }
 .transport-buttons { display: flex; justify-content: center; align-items: center; gap: 20px; }

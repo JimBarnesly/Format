@@ -30,6 +30,9 @@ toggles playback, `J`/`L` selects the previous/next track, `M` toggles mute,
 up/down changes volume, `0`–`9` seeks by percentage, `Home`/`End` seeks to the
 ends, and `F` toggles fullscreen. On the Library page left/right remains
 reserved for moving through Cover Flow and Enter plays the centred album.
+Network interruptions retry the current track with capped backoff instead of
+advancing the album. An unreadable file is retried once, then skipped so the
+rest of the album can continue; the player announces either condition.
 
 ## Raspberry Pi 4B touchscreen player
 
