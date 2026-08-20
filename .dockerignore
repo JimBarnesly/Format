@@ -1,0 +1,6 @@
+.git
+.project-office
+node_modules
+data
+cache
+npm-debug.log*
