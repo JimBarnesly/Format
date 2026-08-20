@@ -26,6 +26,36 @@ test("a locally complete album remains unverified across repeated scans", () => 
   assert.deepEqual(second, first);
 });
 
+test("an authoritative record without a manifest remains unpublished", () => {
+  const result = shadowPublicationState({
+    existing: { authoritative: true, status: "published", published: true },
+    authoritativeManifest: null,
+    albumIncomplete: false
+  });
+
+  assert.deepEqual(result, {
+    complete: false,
+    status: "incomplete",
+    published: false,
+    source: "local-scan"
+  });
+});
+
+test("malformed authoritative manifest entries fail closed without crashing reconciliation", () => {
+  assert.doesNotThrow(() => shadowPublicationState({
+    existing: { authoritative: true, source: "acquisition" },
+    authoritativeManifest: [null, {}, "validated"],
+    albumIncomplete: false
+  }));
+  const result = shadowPublicationState({
+    existing: { authoritative: true, source: "acquisition" },
+    authoritativeManifest: [null, {}, "validated"],
+    albumIncomplete: false
+  });
+  assert.equal(result.status, "incomplete");
+  assert.equal(result.published, false);
+});
+
 test("an authoritative complete manifest is published", () => {
   const result = shadowPublicationState({
     existing: { authoritative: true, source: "acquisition" },

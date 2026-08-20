@@ -4,9 +4,12 @@ export function shadowPublicationState({
   albumIncomplete = false,
   testMode = false
 }) {
-  const complete = authoritativeManifest
-    ? authoritativeManifest.length > 0 && authoritativeManifest.every((entry) => entry.status === "validated")
-    : !albumIncomplete;
+  const manifestComplete = Array.isArray(authoritativeManifest)
+    && authoritativeManifest.length > 0
+    && authoritativeManifest.every((entry) => entry !== null
+      && typeof entry === "object"
+      && entry.status === "validated");
+  const complete = existing.authoritative ? manifestComplete : !albumIncomplete;
   const mayRetainLegacyPublication = existing.source === "existing-library" && existing.published === true;
   const mayPublishUnverified = mayRetainLegacyPublication || testMode;
   const status = complete
