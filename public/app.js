@@ -1321,6 +1321,7 @@ function wireAudioEvents(element) {
 function replaceAudioElement() {
   const previous = audio;
   const replacement = previous.cloneNode(false);
+  replacement.removeAttribute("src");
   replacement.volume = previous.volume;
   replacement.muted = previous.muted;
   replacement.playbackRate = previous.playbackRate;

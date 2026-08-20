@@ -63,6 +63,21 @@ test("duplicate network errors coalesce until the retry executes", () => {
   assert.equal(scheduled[1].delay, 3000);
 });
 
+test("mixed error classes coalesce until the current retry executes", () => {
+  const { controller, scheduled, retries, advances } = harness();
+  controller.trackChanged("track-1", "/audio/1");
+
+  controller.handleError({ code: 2, source: "/audio/1" });
+  controller.handleError({ code: 3, source: "/audio/1" });
+  assert.equal(scheduled.length, 1);
+  assert.deepEqual(advances, []);
+
+  scheduled[0].callback();
+  assert.deepEqual(retries, ["track-1"]);
+  controller.handleError({ code: 3, source: "/audio/1" });
+  assert.equal(scheduled[1].delay, 500);
+});
+
 test("an aborted load does not retry or advance playback", () => {
   const { controller, scheduled, retries, advances, reports } = harness();
   controller.trackChanged("track-1", "/audio/1");
