@@ -58,6 +58,16 @@ export function authoritativeExpectedTrackCount(media) {
   return total;
 }
 
+export function authoritativePosition(value) {
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+export function retainedExpectedTrackCount(candidate, existing) {
+  return Number.isInteger(candidate) && candidate > 0
+    ? candidate
+    : Number.isInteger(existing) && existing > 0 ? existing : null;
+}
+
 export function publishedTrackIdsForAlbum(record, albumTrackIds) {
   if (!record?.published || !Array.isArray(albumTrackIds)) return [];
   if (!record.authoritative) return [...albumTrackIds];

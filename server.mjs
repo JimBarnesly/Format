@@ -13,8 +13,10 @@ import { publishedMediaPath } from "./published-media-policy.mjs";
 import {
   authoritativeExpectedTrackCount,
   authoritativeManifestEntries,
+  authoritativePosition,
   persistedShadowManifest,
   publishedTrackIdsForAlbum,
+  retainedExpectedTrackCount,
   safeManifestEntries,
   shadowPublicationState
 } from "./shadow-publication-policy.mjs";
@@ -1092,8 +1094,8 @@ async function identifyShadowAlbum(id) {
           && normalized(canonicalTrackTitle(candidate.title)) === normalized(canonicalTrackTitle(title)));
       if (local) used.add(local.id);
       return {
-        disc: Number(medium.position) || mediumIndex + 1,
-        position: Number(track.position) || trackIndex + 1,
+        disc: authoritativePosition(medium.position),
+        position: authoritativePosition(track.position),
         title,
         recordingId,
         localTrackId: local?.id || null,
@@ -1115,7 +1117,7 @@ async function identifyShadowAlbum(id) {
       selectedReleaseTitle: selected.title,
       selectedReleaseCountry: selected.country || null,
       originalReleaseYear: group["first-release-date"]?.slice(0, 4) || record.originalReleaseYear,
-      expectedTrackCount,
+      expectedTrackCount: retainedExpectedTrackCount(expectedTrackCount, record.expectedTrackCount),
       localTrackCount: localTracks.length,
       manifest,
       status: publication.status,

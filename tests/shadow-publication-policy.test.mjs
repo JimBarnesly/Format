@@ -4,8 +4,10 @@ import { test } from "node:test";
 import {
   authoritativeExpectedTrackCount,
   authoritativeManifestEntries,
+  authoritativePosition,
   persistedShadowManifest,
   publishedTrackIdsForAlbum,
+  retainedExpectedTrackCount,
   safeManifestEntries,
   shadowPublicationState
 } from "../shadow-publication-policy.mjs";
@@ -151,6 +153,21 @@ test("direct identification uses declared medium totals rather than manifest len
   assert.equal(authoritativeExpectedTrackCount([{ "track-count": true, tracks: [{ position: 1 }] }]), null);
   assert.match(serverSource, /const expectedTrackCount = authoritativeExpectedTrackCount\(selected\.media\)/);
   assert.match(serverSource, /existing: \{ \.\.\.record, authoritative: true, expectedTrackCount \},[\s\S]*authoritativeManifest: manifest/);
+});
+
+test("direct identification never fabricates missing authoritative positions", () => {
+  assert.equal(authoritativePosition(1), 1);
+  assert.equal(authoritativePosition(0), null);
+  assert.equal(authoritativePosition("1"), null);
+  assert.equal(authoritativePosition(undefined), null);
+  assert.match(serverSource, /disc: authoritativePosition\(medium\.position\)/);
+  assert.match(serverSource, /position: authoritativePosition\(track\.position\)/);
+});
+
+test("invalid re-identification retains the last valid expected count without publishing", () => {
+  assert.equal(retainedExpectedTrackCount(null, 3), 3);
+  assert.equal(retainedExpectedTrackCount(2, 3), 2);
+  assert.match(serverSource, /expectedTrackCount: retainedExpectedTrackCount\(expectedTrackCount, record\.expectedTrackCount\)/);
 });
 
 test("authoritative track positions must form contiguous discs and tracks", () => {
