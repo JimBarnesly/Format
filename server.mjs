@@ -9,7 +9,7 @@ import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
 import { selectOriginalReleaseGroup } from "./release-metadata.mjs";
-import { shadowPublicationState } from "./shadow-publication-policy.mjs";
+import { persistedShadowManifest, safeManifestEntries, shadowPublicationState } from "./shadow-publication-policy.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(process.env.MUSIC_ROOT || "/home/jake/Music");
@@ -937,7 +937,7 @@ async function reconcileShadowAlbums(scanned) {
       }));
     const authoritativeUsed = new Set();
     const authoritativeManifest = existing.authoritative && Array.isArray(existing.manifest)
-      ? existing.manifest.map((entry) => {
+      ? safeManifestEntries(existing.manifest).map((entry) => {
         const local = localTracks.find((track) => !authoritativeUsed.has(track.id) && entry.recordingId && track.musicBrainzRecordingId === entry.recordingId)
           || localTracks.find((track) => !authoritativeUsed.has(track.id) && track.disc === entry.disc && track.track === entry.position
             && normalized(canonicalTrackTitle(track.title)) === normalized(canonicalTrackTitle(entry.title)))
@@ -947,7 +947,11 @@ async function reconcileShadowAlbums(scanned) {
         return { ...entry, localTrackId: local?.id || null, status: local ? "validated" : "missing" };
       })
       : null;
-    const manifest = authoritativeManifest || localManifest;
+    const manifest = persistedShadowManifest({
+      authoritative: existing.authoritative,
+      authoritativeManifest,
+      localManifest
+    });
     const publication = shadowPublicationState({
       existing,
       authoritativeManifest,
@@ -965,7 +969,7 @@ async function reconcileShadowAlbums(scanned) {
       status: publication.status,
       published: publication.published,
       localAlbumId: album.id,
-      expectedTrackCount: authoritativeManifest?.length || album.expectedTracks,
+      expectedTrackCount: existing.authoritative ? existing.expectedTrackCount : album.expectedTracks,
       localTrackCount: album.trackIds.length,
       missingTracks: [...album.missingTracks],
       missingDiscs: album.missingDiscs,

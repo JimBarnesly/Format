@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { shadowPublicationState } from "../shadow-publication-policy.mjs";
+import { persistedShadowManifest, safeManifestEntries, shadowPublicationState } from "../shadow-publication-policy.mjs";
 
 const serverSource = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
 
 test("library reconciliation uses the fail-closed publication policy", () => {
-  assert.match(serverSource, /import \{ shadowPublicationState \} from "\.\/shadow-publication-policy\.mjs"/);
+  assert.match(serverSource, /import \{ persistedShadowManifest, safeManifestEntries, shadowPublicationState \} from "\.\/shadow-publication-policy\.mjs"/);
   assert.match(serverSource, /shadowPublicationState\(\{[\s\S]*existing,[\s\S]*authoritativeManifest,[\s\S]*albumIncomplete: album\.incomplete,[\s\S]*testMode[\s\S]*\}\)/);
+  assert.match(serverSource, /safeManifestEntries\(existing\.manifest\)\.map/);
+  assert.match(serverSource, /expectedTrackCount: existing\.authoritative \? existing\.expectedTrackCount : album\.expectedTracks/);
+  assert.match(serverSource, /persistedShadowManifest\(\{[\s\S]*authoritative: existing\.authoritative,[\s\S]*authoritativeManifest,[\s\S]*localManifest[\s\S]*\}\)/);
 });
 
 test("a locally complete album remains unverified across repeated scans", () => {
@@ -56,12 +59,65 @@ test("malformed authoritative manifest entries fail closed without crashing reco
   assert.equal(result.published, false);
 });
 
+test("server manifest preprocessing removes values that cannot be dereferenced", () => {
+  assert.deepEqual(safeManifestEntries([null, undefined, "track", [], { title: "Valid shape" }]), [
+    { title: "Valid shape" }
+  ]);
+});
+
+test("missing authoritative data is never replaced with locally fabricated authority", () => {
+  const localManifest = [{ disc: 1, position: 1, title: "Local", localTrackId: "local-1", status: "local_unverified" }];
+
+  assert.deepEqual(persistedShadowManifest({
+    authoritative: true,
+    authoritativeManifest: null,
+    localManifest
+  }), []);
+  assert.deepEqual(persistedShadowManifest({
+    authoritative: false,
+    authoritativeManifest: null,
+    localManifest
+  }), localManifest);
+});
+
+test("a truncated authoritative manifest cannot erase the expected track total", () => {
+  const result = shadowPublicationState({
+    existing: { authoritative: true, source: "acquisition", expectedTrackCount: 2 },
+    authoritativeManifest: [
+      { disc: 1, position: 1, title: "One", localTrackId: "local-1", status: "validated" }
+    ],
+    albumIncomplete: false
+  });
+
+  assert.equal(result.complete, false);
+  assert.equal(result.published, false);
+  assert.equal(result.status, "incomplete");
+});
+
+test("duplicate or incomplete track identities cannot publish", () => {
+  const base = { authoritative: true, source: "acquisition", expectedTrackCount: 2 };
+  for (const authoritativeManifest of [
+    [
+      { disc: 1, position: 1, title: "One", localTrackId: "local-1", status: "validated" },
+      { disc: 1, position: 1, title: "Duplicate", localTrackId: "local-2", status: "validated" }
+    ],
+    [
+      { disc: 1, position: 1, title: "", localTrackId: "local-1", status: "validated" },
+      { disc: 1, position: 2, title: "Two", localTrackId: "", status: "validated" }
+    ]
+  ]) {
+    const result = shadowPublicationState({ existing: base, authoritativeManifest, albumIncomplete: false });
+    assert.equal(result.published, false);
+    assert.equal(result.status, "incomplete");
+  }
+});
+
 test("an authoritative complete manifest is published", () => {
   const result = shadowPublicationState({
-    existing: { authoritative: true, source: "acquisition" },
+    existing: { authoritative: true, source: "acquisition", expectedTrackCount: 2 },
     authoritativeManifest: [
-      { status: "validated" },
-      { status: "validated" }
+      { disc: 1, position: 1, title: "One", localTrackId: "local-1", status: "validated" },
+      { disc: 1, position: 2, title: "Two", localTrackId: "local-2", status: "validated" }
     ],
     albumIncomplete: false
   });
@@ -76,8 +132,11 @@ test("an authoritative complete manifest is published", () => {
 
 test("an authoritative manifest with a missing track stays incomplete", () => {
   const result = shadowPublicationState({
-    existing: { authoritative: true, source: "acquisition" },
-    authoritativeManifest: [{ status: "validated" }, { status: "missing" }],
+    existing: { authoritative: true, source: "acquisition", expectedTrackCount: 2 },
+    authoritativeManifest: [
+      { disc: 1, position: 1, title: "One", localTrackId: "local-1", status: "validated" },
+      { disc: 1, position: 2, title: "Two", localTrackId: null, status: "missing" }
+    ],
     albumIncomplete: false
   });
 
