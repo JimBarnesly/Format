@@ -40,6 +40,8 @@ const rateLimitFile = join(dataDir, "lookup-rate-limit.json");
 const firstReleaseYearFile = join(dataDir, "first-release-years.json");
 const metadataCorrectionsFile = resolve(process.env.METADATA_CORRECTIONS_FILE || "metadata-corrections.json");
 const port = Number(process.env.PORT || 4534);
+const host = process.env.HOST || "0.0.0.0";
+const readOnly = process.env.FORMAT_READ_ONLY === "true";
 const testMode = process.env.NODE_ENV === "test";
 const spotiflacBin = process.env.SPOTIFLAC_BIN || "spotiflac";
 const spotiflacCwd = resolve(process.env.SPOTIFLAC_CWD || process.cwd());
@@ -48,7 +50,7 @@ const libraryMaintenanceIntervalMs = Math.max(60_000, Number(process.env.LIBRARY
 const libraryProbeConcurrency = Math.max(1, Math.min(12, Number(process.env.LIBRARY_PROBE_CONCURRENCY || 6)));
 const acquisitionStallTimeoutMs = Math.max(testMode ? 250 : 60_000, Number(process.env.ACQUISITION_STALL_TIMEOUT_MS || 3 * 60 * 1000));
 const acquisitionMaxAttempts = Math.max(1, Number(process.env.ACQUISITION_MAX_ATTEMPTS || 3));
-const shadowRepairEnabled = process.env.SHADOW_REPAIR_ENABLED === "true";
+const shadowRepairEnabled = !readOnly && process.env.SHADOW_REPAIR_ENABLED === "true";
 const audioExtensions = new Set([".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav"]);
 const catalogueReleases = new Map();
 const spotifyResolutionCache = new Map([
@@ -450,9 +452,20 @@ async function applyMetadataCorrections(paths) {
   return applied;
 }
 
+async function verifyMusicMount() {
+  const expected = process.env.MUSIC_FILESYSTEM_UUID;
+  if (!expected) return;
+  const { stdout } = await execFileAsync("findmnt", ["--json", "--target", root, "--output", "UUID"]);
+  const mounts = JSON.parse(stdout).filesystems;
+  if (mounts?.length !== 1 || mounts[0].uuid !== expected) {
+    throw Object.assign(new Error("The configured music HDD is unavailable."), { status: 503 });
+  }
+}
+
 async function performLibraryScan() {
+  await verifyMusicMount();
   let paths = await walk(root);
-  const corrections = await applyMetadataCorrections(paths);
+  const corrections = readOnly ? [] : await applyMetadataCorrections(paths);
   if (corrections.length) {
     console.log(`Applied ${corrections.length} metadata correction${corrections.length === 1 ? "" : "s"}.`);
     paths = await walk(root);
@@ -1732,6 +1745,7 @@ function prioritizeAcquisition(id) {
 }
 
 function processAcquisitionQueue() {
+  if (readOnly) return;
   if (!initialLibraryScanComplete || activeAcquisitionId || acquisitionQueue.length === 0) return;
   if (lookupRateLimitState().active) {
     scheduleLookupRetry();
@@ -2397,6 +2411,7 @@ async function prepareFeaturedRecommendations() {
 }
 
 async function coverFor(id, response) {
+  await verifyMusicMount();
   const source = await openPublishedMedia(id, library.tracks, root);
   if (!source) return sendJson(response, 404, { error: "Track not found" });
   try {
@@ -2418,6 +2433,7 @@ async function coverFor(id, response) {
 }
 
 async function streamAudio(id, request, response) {
+  await verifyMusicMount();
   const source = await openPublishedMedia(id, library.tracks, root);
   if (!source) return sendJson(response, 404, { error: "Track not found" });
   const info = await source.stat();
@@ -2454,6 +2470,11 @@ async function streamAudio(id, request, response) {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
+    if (readOnly && !["GET", "HEAD"].includes(request.method)
+      && !(request.method === "POST" && ["/api/rescan", "/api/shadow-albums/reconcile"].includes(url.pathname))) {
+      return sendJson(response, 403, { error: "This Format server is in read-only mode." });
+    }
+    if (url.pathname === "/api/health") return sendJson(response, 200, { readOnly, initialLibraryScanComplete, albums: library.albums.length, tracks: library.tracks.length });
     if (url.pathname === "/api/library") return sendJson(response, 200, library);
     if (url.pathname === "/api/bootstrap") {
       return sendJson(response, 200, {
@@ -2682,14 +2703,16 @@ await loadShadowAlbums();
 await loadFirstReleaseYears();
 await loadCataloguedLibrarySnapshot();
 await loadLookupRateLimit();
-server.listen(port, "0.0.0.0", () => {
-  console.log(`Format listening on http://0.0.0.0:${port}`);
+server.listen(port, host, () => {
+  console.log(`Format listening on http://${host}:${port}`);
 });
 void scanLibrary()
   .then(() => {
     initialLibraryScanComplete = true;
-    reconcileCompletedAcquisitions();
-    processAcquisitionQueue();
+    if (!readOnly) {
+      reconcileCompletedAcquisitions();
+      processAcquisitionQueue();
+    }
     void enrichFirstReleaseYears().catch((error) => console.error("First-release year enrichment failed:", error.message));
     if (shadowRepairEnabled) {
       void maintainShadowAlbums().catch((error) => console.error("Initial shadow maintenance failed:", error.message));
