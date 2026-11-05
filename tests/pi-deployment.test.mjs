@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 test('Pi read-only mode blocks media mutation and background acquisition without relaxing publication', async () => {
   const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
   assert.match(server, /const corrections = readOnly \? \[\] : await applyMetadataCorrections\(paths\)/);
-  assert.match(server, /function processAcquisitionQueue\(\) \{\s+if \(readOnly\) return;/);
+  assert.match(server, /function processAcquisitionQueue\(\) \{\s+if \(shuttingDown\) return;\s+if \(\(readOnly && !downloadOnly\) \|\| acquisitionShutdownUncertain\) return;/);
   assert.match(server, /const shadowRepairEnabled = !readOnly/);
   assert.match(server, /server.listen\(port, host/);
   assert.match(server, /readOnly && !\["GET", "HEAD"\]/);
@@ -56,6 +56,10 @@ test('read-only server scans without retagging, rejects mutations, and retains p
       await new Promise(r=>setTimeout(r,100));
     }
     assert.ok(ready, 'server finished scanning');
+    const health = await (await fetch(base+'/api/health')).json();
+    assert.equal(health.readOnly, true);
+    assert.deepEqual(health.downloads, {enabled:false,ready:false,reason:'disabled'});
+    assert.deepEqual(health.capabilities, {acquire:false,cancel:false,prioritize:false,editMetadata:false,deleteMedia:false,repair:false});
     assert.deepEqual(await readFile(audio), original);
     const library = await (await fetch(base+'/api/library')).json();
     assert.equal(library.albums.length, 0, 'production policy does not silently publish unverified albums');

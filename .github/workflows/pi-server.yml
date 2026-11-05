@@ -19,3 +19,5 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm run verify
       - run: sh -n deployment/pi/setup.sh && python3 -m unittest discover -s deployment/pi -p 'test_*.py'
+      - name: Verify disposable systemd filesystem namespace
+        run: python3 deployment/pi/namespace_check.py
