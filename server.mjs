@@ -75,6 +75,7 @@ const shadowAlbums = new Map();
 const firstReleaseYears = new Map();
 let activeAcquisitionId = null;
 let activeAcquisitionProcess = null;
+let activeAcquisitionCompletion = null;
 let acquisitionShutdownUncertain = false;
 let shuttingDown = false;
 let initialLibraryScanComplete = false;
@@ -1260,7 +1261,7 @@ async function loadAcquisitions() {
       const { release, ...state } = savedState;
       if (!state.id || !release?.artist || !release?.title) continue;
       catalogueReleases.set(state.id, release);
-      if (downloadOnly && !isDownloadOnlyJob(state)) {
+      if (readOnly && (!downloadOnly || !isDownloadOnlyJob(state))) {
         acquisitionState.set(state.id, state);
         continue; // Preserve old work verbatim. Opting in is not permission to resume it.
       }
@@ -1643,6 +1644,9 @@ async function runAcquisition(state, release) {
     }
   );
   activeAcquisitionProcess = child;
+  let resolveCompletion;
+  const completion = new Promise((resolve) => { resolveCompletion = resolve; });
+  activeAcquisitionCompletion = completion;
   child.once("exit", () => { void terminateProcessTree(child); });
   let tail = "";
   let lastProgressAt = Date.now();
@@ -1699,7 +1703,7 @@ async function runAcquisition(state, release) {
     state.finishedAt = new Date().toISOString();
     finishAcquisition(state);
   });
-  child.on("close", async (code) => {
+  const completeAcquisition = async (code) => {
     clearInterval(inactivityTimer);
     clearInterval(storageTimer);
     try { await terminateProcessTree(child); }
@@ -1766,6 +1770,7 @@ async function runAcquisition(state, release) {
         importError = error;
       }
     }
+    if (shuttingDown && !state.publicationStarted) return;
     const libraryAlbum = cataloguedLibrary.albums.find((album) =>
       normalized(album.artist) === normalized(state.artist)
       && normalized(album.title) === normalized(state.title)
@@ -1808,6 +1813,17 @@ async function runAcquisition(state, release) {
     delete state.cancelRequested;
     delete state.publicationStarted;
     finishAcquisition(state);
+  };
+  child.on("close", (code) => {
+    void completeAcquisition(code).catch((error) => {
+      state.status = "failed";
+      state.message = error.message;
+      state.finishedAt = new Date().toISOString();
+      finishAcquisition(state);
+    }).finally(() => {
+      resolveCompletion();
+      if (activeAcquisitionCompletion === completion) activeAcquisitionCompletion = null;
+    });
   });
 }
 
@@ -2884,7 +2900,18 @@ async function shutdown() {
   clearTimeout(lookupRetryTimer);
   try {
     await terminateProcessTree(activeAcquisitionProcess);
-    await saveAcquisitions();
+    // Publication is an atomic rename followed by durable manifest/queue state.
+    // Wait for that handler before exit so a renamed album is not stranded.
+    await activeAcquisitionCompletion;
+    const state = acquisitionState.get(activeAcquisitionId);
+    if (state?.cancelRequested && !state.publicationStarted) {
+      state.status = "cancelled";
+      state.message = "Cancelled by user.";
+      state.finishedAt = new Date().toISOString();
+      delete state.cancelRequested;
+      finishAcquisition(state);
+    }
+    if (!readOnly || downloadOnly) await saveAcquisitions();
     await shadowSavePromise;
     process.exit(0);
   } catch (error) {

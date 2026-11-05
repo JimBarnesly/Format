@@ -286,3 +286,62 @@ test('service termination stops a TERM-ignoring process group and preserves rest
   assert.equal((await readFile(f.log,'utf8')).includes('fixture-2'),false);
   assert.deepEqual(await readFile(f.original),f.originalBytes);
 });
+
+test('read-only service shutdown preserves legacy queue bytes and interrupted status', async t=>{
+  const legacy={id:'legacy-running',artist:'Legacy',title:'Legacy',status:'running',origin:'manual',
+    startedAt:'2026-01-01T00:00:00Z',cancelRequested:true,release:{id:'legacy-running',artist:'Legacy',title:'Legacy'}};
+  const f=await startFixture(t,{enabled:false,jobs:[legacy]});
+  const [reported]=await f.queue();
+  assert.equal(reported.status,legacy.status);
+  assert.equal(reported.startedAt,legacy.startedAt);
+  assert.equal(reported.cancelRequested,legacy.cancelRequested);
+  await f.stop();
+  assert.equal(await readFile(join(f.data,'acquisitions.json'),'utf8'),JSON.stringify({items:[legacy]}));
+  await assert.rejects(access(f.log),{code:'ENOENT'});
+});
+
+test('a requested cancellation remains cancelled across immediate service termination', async t=>{
+  const f=await startFixture(t);
+  await f.acquire('fixture-11'); await f.started('term-resistant-ready');
+  assert.equal((await f.post('/api/acquisitions/cancel?id=fixture-11')).status,202);
+  await f.stop();
+  const saved=JSON.parse(await readFile(join(f.data,'acquisitions.json'),'utf8')).items;
+  assert.equal(saved.find(row=>row.id==='fixture-11').status,'cancelled');
+  assert.deepEqual(await readdir(f.albums),[]);
+  assert.deepEqual(await readFile(f.original),f.originalBytes);
+});
+
+test('shutdown immediately after atomic rename finishes publication and never redownloads on restart', async t=>{
+  const f=await startFixture(t);
+  await f.stop();
+  const hook=join(f.temporary,'stop-after-rename.mjs');
+  await writeFile(hook,`
+    import fs from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    const original=fs.rename;
+    fs.rename=async function(source,destination) {
+      await original(source,destination);
+      if(String(destination).includes('/albums/')) {
+        process.kill(process.pid,'SIGTERM');
+        await new Promise(resolve=>setTimeout(resolve,1000));
+      }
+    };
+    syncBuiltinESMExports();
+  `);
+  await f.start({NODE_OPTIONS:'--import='+hook});
+  await f.acquire('fixture-0');
+  await until(async()=>{try {await fetch(f.base+'/api/health');return false;} catch {return true;}},
+    Boolean,'publication did not trigger shutdown');
+  await f.stop();
+  const saved=JSON.parse(await readFile(join(f.data,'shadow-albums.json'),'utf8'));
+  const record=saved.albums.find(row=>row.acquisitionId==='fixture-0');
+  assert.equal(record.published,true);
+  assert.equal(record.manifest.length,1);
+  const queue=JSON.parse(await readFile(join(f.data,'acquisitions.json'),'utf8'));
+  assert.equal(queue.items.find(row=>row.id==='fixture-0').status,'complete');
+  await f.start({NODE_OPTIONS:''});
+  assert.equal((await f.terminal('fixture-0')).status,'complete');
+  assert.equal((await f.get('/api/library')).albums.length,1);
+  assert.deepEqual((await readFile(f.log,'utf8')).trim().split('\n'),['fixture-0']);
+  assert.deepEqual(await readFile(f.original),f.originalBytes);
+});
