@@ -4,7 +4,11 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { terminateProcessTree } from "./acquisition-process.mjs";
 import { promisify } from "node:util";
+import { acquisitionMarker, assertNoSymlinks, assertSafeStagingTree, downloadReadiness,
+  downloadRequestAllowed, isDownloadOnlyJob, verifyDownloader, verifyDownloadStorage } from "./download-policy.mjs";
 import { publishAlbumDirectory } from "./album-publisher.mjs";
 import { quarantinePreview } from "./staging-quarantine.mjs";
 import { readStagingInventory } from "./acquisition-inventory.mjs";
@@ -22,11 +26,11 @@ import {
 } from "./shadow-publication-policy.mjs";
 
 const execFileAsync = promisify(execFile);
-const root = resolve(process.env.MUSIC_ROOT || "/home/jake/Music");
+const root = resolve(process.env.MUSIC_ROOT || join(homedir(), "Music"));
 const downloadRoot = resolve(process.env.DOWNLOAD_ROOT || join(root, "SpotiFLAC"));
 const publicDir = resolve("public");
-const cacheDir = resolve(process.env.CACHE_DIR || "/home/jake/.cache/gateway-music-browser");
-const dataDir = resolve(process.env.DATA_DIR || "/home/jake/.local/share/gateway-music-browser");
+const cacheDir = resolve(process.env.CACHE_DIR || join(homedir(), ".cache/gateway-music-browser"));
+const dataDir = resolve(process.env.DATA_DIR || join(homedir(), ".local/share/gateway-music-browser"));
 const discoveryFile = join(dataDir, "discovery.json");
 const acquisitionFile = join(dataDir, "acquisitions.json");
 const approvalFile = join(dataDir, "download-approvals.json");
@@ -40,15 +44,22 @@ const rateLimitFile = join(dataDir, "lookup-rate-limit.json");
 const firstReleaseYearFile = join(dataDir, "first-release-years.json");
 const metadataCorrectionsFile = resolve(process.env.METADATA_CORRECTIONS_FILE || "metadata-corrections.json");
 const port = Number(process.env.PORT || 4534);
+const host = process.env.HOST || "0.0.0.0";
+const downloadOnly = process.env.FORMAT_DOWNLOADS_ENABLED === "true";
+const readOnly = downloadOnly || process.env.FORMAT_READ_ONLY === "true";
 const testMode = process.env.NODE_ENV === "test";
 const spotiflacBin = process.env.SPOTIFLAC_BIN || "spotiflac";
 const spotiflacCwd = resolve(process.env.SPOTIFLAC_CWD || process.cwd());
+const downloadConfig = { root, downloadRoot, stagingRoot, host, downloader: spotiflacBin,
+  acquisitionRoot: process.env.FORMAT_ACQUISITION_ROOT || "",
+  filesystemUuid: process.env.MUSIC_FILESYSTEM_UUID || "" };
+const downloadActions = new Set(["/api/acquire-album", "/api/acquisitions/cancel", "/api/acquisitions/prioritize"]);
 const libraryScanIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_SCAN_INTERVAL_MS || 15 * 60 * 1000));
 const libraryMaintenanceIntervalMs = Math.max(60_000, Number(process.env.LIBRARY_MAINTENANCE_INTERVAL_MS || 24 * 60 * 60 * 1000));
 const libraryProbeConcurrency = Math.max(1, Math.min(12, Number(process.env.LIBRARY_PROBE_CONCURRENCY || 6)));
 const acquisitionStallTimeoutMs = Math.max(testMode ? 250 : 60_000, Number(process.env.ACQUISITION_STALL_TIMEOUT_MS || 3 * 60 * 1000));
 const acquisitionMaxAttempts = Math.max(1, Number(process.env.ACQUISITION_MAX_ATTEMPTS || 3));
-const shadowRepairEnabled = process.env.SHADOW_REPAIR_ENABLED === "true";
+const shadowRepairEnabled = !readOnly && process.env.SHADOW_REPAIR_ENABLED === "true";
 const audioExtensions = new Set([".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav"]);
 const catalogueReleases = new Map();
 const spotifyResolutionCache = new Map([
@@ -64,6 +75,9 @@ const shadowAlbums = new Map();
 const firstReleaseYears = new Map();
 let activeAcquisitionId = null;
 let activeAcquisitionProcess = null;
+let activeAcquisitionCompletion = null;
+let acquisitionShutdownUncertain = false;
+let shuttingDown = false;
 let initialLibraryScanComplete = false;
 let acquisitionSavePromise = Promise.resolve();
 let shadowSavePromise = Promise.resolve();
@@ -75,15 +89,6 @@ let lastMusicBrainzRequestAt = 0;
 
 const albumKey = (artist, title) => `${normalized(artist)}\0${normalized(canonicalAlbumTitle(title))}`;
 const acquisitionPriorities = { manual: 10, approved_repair: 20, automatic_repair: 30, discovery: 40 };
-
-function terminateProcessTree(child) {
-  if (!child?.pid) return;
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch (error) {
-    if (error.code !== "ESRCH") child.kill("SIGTERM");
-  }
-}
 
 let cataloguedLibrary = { albums: [], tracks: [], updatedAt: null };
 let library = { albums: [], tracks: [], updatedAt: null };
@@ -206,12 +211,21 @@ function safeMusicPath(id) {
   return candidate === root || candidate.startsWith(`${root}${sep}`) ? candidate : null;
 }
 
-async function walk(directory) {
+async function walk(directory, { libraryScan = false } = {}) {
   const found = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...await walk(path));
-    else if (audioExtensions.has(extname(entry.name).toLowerCase())) found.push(path);
+    if (entry.isSymbolicLink()) continue;
+    if (libraryScan && path === stagingRoot) continue;
+    if (entry.isDirectory()) {
+      // Also recognize preserved acquisition directories after downloads are disabled.
+      // A staged album must never be indexed or playable merely because it has tags.
+      if (libraryScan && (path === downloadConfig.acquisitionRoot || existsSync(join(path, acquisitionMarker)))) {
+        const albums = join(path, "albums");
+        await assertNoSymlinks(albums);
+        found.push(...await walk(albums, { libraryScan }));
+      } else found.push(...await walk(path, { libraryScan }));
+    } else if (entry.isFile() && audioExtensions.has(extname(entry.name).toLowerCase())) found.push(path);
   }
   return found;
 }
@@ -450,12 +464,23 @@ async function applyMetadataCorrections(paths) {
   return applied;
 }
 
+async function verifyMusicMount() {
+  const expected = process.env.MUSIC_FILESYSTEM_UUID;
+  if (!expected) return;
+  const { stdout } = await execFileAsync("findmnt", ["--json", "--target", root, "--output", "UUID"]);
+  const mounts = JSON.parse(stdout).filesystems;
+  if (mounts?.length !== 1 || mounts[0].uuid !== expected) {
+    throw Object.assign(new Error("The configured music HDD is unavailable."), { status: 503 });
+  }
+}
+
 async function performLibraryScan() {
-  let paths = await walk(root);
-  const corrections = await applyMetadataCorrections(paths);
+  await verifyMusicMount();
+  let paths = await walk(root, { libraryScan: true });
+  const corrections = readOnly ? [] : await applyMetadataCorrections(paths);
   if (corrections.length) {
     console.log(`Applied ${corrections.length} metadata correction${corrections.length === 1 ? "" : "s"}.`);
-    paths = await walk(root);
+    paths = await walk(root, { libraryScan: true });
   }
   const tracksByIndex = new Array(paths.length);
   const cachedTracks = new Map(cataloguedLibrary.tracks.map((track) => [track.id, track]));
@@ -624,9 +649,11 @@ async function scanLibrary() {
   libraryScanPromise = performLibraryScan();
   try {
     await libraryScanPromise;
+    initialLibraryScanComplete = true;
     return library;
   } finally {
     libraryScanPromise = null;
+    if (initialLibraryScanComplete) processAcquisitionQueue();
   }
 }
 
@@ -967,7 +994,7 @@ async function reconcileShadowAlbums(scanned) {
       existing,
       authoritativeManifest,
       albumIncomplete: album.incomplete,
-      testMode
+      testMode: testMode && !downloadOnly
     });
     shadowAlbums.set(id, {
       ...existing,
@@ -1037,6 +1064,86 @@ async function refreshPublishedLibrary() {
   await prepareFeaturedRecommendations();
 }
 
+async function identifyAlbumManifest(record, localTracks) {
+  const groupMatches = (item) => normalized(canonicalAlbumTitle(item.title)) === normalized(canonicalAlbumTitle(record.title))
+    && (item["artist-credit"] || []).some((credit) => normalized(credit.artist?.name) === normalized(record.artist));
+  const search = await musicBrainz(`/release-group?query=${encodeURIComponent(`releasegroup:${record.title} AND artist:${record.artist}`)}&fmt=json&limit=10`);
+  const groups = (search["release-groups"] || []).filter(groupMatches);
+  const specialEditionWanted = /\blive\b|compilation|remix/i.test(record.title);
+  const group = [...groups].sort((left, right) => {
+    const leftSpecial = specialEditionWanted ? 0 : (left["secondary-types"] || []).some((type) => /live|compilation|remix/i.test(type)) ? 1 : 0;
+    const rightSpecial = specialEditionWanted ? 0 : (right["secondary-types"] || []).some((type) => /live|compilation|remix/i.test(type)) ? 1 : 0;
+    return leftSpecial - rightSpecial
+      || String(left["first-release-date"] || "9999").localeCompare(String(right["first-release-date"] || "9999"));
+  })[0];
+  if (!group?.id) throw new Error("MusicBrainz could not identify the album release group confidently.");
+  const releasesResponse = await musicBrainz(`/release?release-group=${group.id}&inc=recordings+media+artist-credits&fmt=json&limit=100`);
+  const localTitles = new Set(localTracks.map((track) => normalized(canonicalTrackTitle(track.title))));
+  const candidates = (releasesResponse.releases || []).filter((release) => (release.media || []).some((medium) => medium.tracks?.length));
+  const releaseTracks = (release) => (release.media || []).flatMap((medium) => medium.tracks || []);
+  const editionPenalty = (release) => /deluxe|expanded|anniversary|box|super deluxe/i.test(`${release.title} ${release.disambiguation || ""}`) ? 100 : 0;
+  const localDiscCount = Math.max(1, ...localTracks.map((track) => track.disc || 1));
+  const score = (release) => {
+    const tracks = releaseTracks(release);
+    const referenceTitles = new Set(tracks.map((track) => normalized(canonicalTrackTitle(track.recording?.title || track.title))));
+    const overlap = [...localTitles].filter((title) => referenceTitles.has(title)).length;
+    const discCount = (release.media || []).length;
+    const expansionPenalty = discCount > localDiscCount ? (discCount - localDiscCount) * 250 : 0;
+    return overlap * 20 - Math.abs(tracks.length - localTracks.length) * 8 - editionPenalty(release) - expansionPenalty
+      + (release.country === "NZ" ? 2 : 0);
+  };
+  const selected = [...candidates].sort((left, right) => score(right) - score(left)
+    || String(left.date || "9999").localeCompare(String(right.date || "9999")))[0];
+  if (!selected || score(selected) < Math.max(20, localTracks.length * 5)) {
+    throw new Error("No MusicBrainz release had enough track-title overlap to select safely.");
+  }
+  const used = new Set();
+  const manifest = (selected.media || []).flatMap((medium, mediumIndex) => (medium.tracks || []).map((track, trackIndex) => {
+    const title = track.recording?.title || track.title || `Track ${trackIndex + 1}`;
+    const recordingId = track.recording?.id || null;
+    const local = localTracks.find((candidate) => !used.has(candidate.id) && recordingId
+      && candidate.musicBrainzRecordingId === recordingId)
+      || localTracks.find((candidate) => !used.has(candidate.id)
+        && candidate.disc === (Number(medium.position) || mediumIndex + 1)
+        && candidate.track === (Number(track.position) || trackIndex + 1)
+        && normalized(canonicalTrackTitle(candidate.title)) === normalized(canonicalTrackTitle(title)))
+      || localTracks.find((candidate) => !used.has(candidate.id)
+        && normalized(canonicalTrackTitle(candidate.title)) === normalized(canonicalTrackTitle(title)));
+    if (local) used.add(local.id);
+    return {
+      disc: authoritativePosition(medium.position),
+      position: authoritativePosition(track.position),
+      title,
+      recordingId,
+      localTrackId: local?.id || null,
+      quality: local ? { codec: local.codec, bitDepth: local.bitDepth, sampleRate: local.sampleRate, bitRate: local.bitRate } : null,
+      status: local ? "validated" : "missing"
+    };
+  }));
+  const expectedTrackCount = authoritativeExpectedTrackCount(selected.media);
+  const publication = shadowPublicationState({
+    existing: { ...record, authoritative: true, expectedTrackCount },
+    authoritativeManifest: manifest,
+    albumIncomplete: false,
+    testMode: testMode && !downloadOnly
+  });
+  return {
+    authoritative: true,
+    releaseGroupId: group.id,
+    selectedReleaseId: selected.id,
+    selectedReleaseTitle: selected.title,
+    selectedReleaseCountry: selected.country || null,
+    originalReleaseYear: group["first-release-date"]?.slice(0, 4) || record.originalReleaseYear,
+    expectedTrackCount: retainedExpectedTrackCount(expectedTrackCount, record.expectedTrackCount),
+    localTrackCount: localTracks.length,
+    manifest,
+    status: publication.status,
+    published: publication.published,
+    lastReconciledAt: new Date().toISOString(),
+    lastError: null
+  };
+}
+
 async function identifyShadowAlbum(id) {
   const record = shadowAlbums.get(id);
   if (!record) throw Object.assign(new Error("Shadow album not found."), { status: 404 });
@@ -1048,83 +1155,7 @@ async function identifyShadowAlbum(id) {
   record.lastError = null;
   await saveShadowAlbums();
   try {
-    const groupMatches = (item) => normalized(canonicalAlbumTitle(item.title)) === normalized(canonicalAlbumTitle(record.title))
-      && (item["artist-credit"] || []).some((credit) => normalized(credit.artist?.name) === normalized(record.artist));
-    const search = await musicBrainz(`/release-group?query=${encodeURIComponent(`releasegroup:${record.title} AND artist:${record.artist}`)}&fmt=json&limit=10`);
-    const groups = (search["release-groups"] || []).filter(groupMatches);
-    const specialEditionWanted = /\blive\b|compilation|remix/i.test(record.title);
-    const group = [...groups].sort((left, right) => {
-      const leftSpecial = specialEditionWanted ? 0 : (left["secondary-types"] || []).some((type) => /live|compilation|remix/i.test(type)) ? 1 : 0;
-      const rightSpecial = specialEditionWanted ? 0 : (right["secondary-types"] || []).some((type) => /live|compilation|remix/i.test(type)) ? 1 : 0;
-      return leftSpecial - rightSpecial
-        || String(left["first-release-date"] || "9999").localeCompare(String(right["first-release-date"] || "9999"));
-    })[0];
-    if (!group?.id) throw new Error("MusicBrainz could not identify the album release group confidently.");
-    const releasesResponse = await musicBrainz(`/release?release-group=${group.id}&inc=recordings+media+artist-credits&fmt=json&limit=100`);
-    const localTitles = new Set(localTracks.map((track) => normalized(canonicalTrackTitle(track.title))));
-    const candidates = (releasesResponse.releases || []).filter((release) => (release.media || []).some((medium) => medium.tracks?.length));
-    const releaseTracks = (release) => (release.media || []).flatMap((medium) => medium.tracks || []);
-    const editionPenalty = (release) => /deluxe|expanded|anniversary|box|super deluxe/i.test(`${release.title} ${release.disambiguation || ""}`) ? 100 : 0;
-    const localDiscCount = Math.max(1, ...localTracks.map((track) => track.disc || 1));
-    const score = (release) => {
-      const tracks = releaseTracks(release);
-      const referenceTitles = new Set(tracks.map((track) => normalized(canonicalTrackTitle(track.recording?.title || track.title))));
-      const overlap = [...localTitles].filter((title) => referenceTitles.has(title)).length;
-      const discCount = (release.media || []).length;
-      const expansionPenalty = discCount > localDiscCount ? (discCount - localDiscCount) * 250 : 0;
-      return overlap * 20 - Math.abs(tracks.length - localTracks.length) * 8 - editionPenalty(release) - expansionPenalty
-        + (release.country === "NZ" ? 2 : 0);
-    };
-    const selected = [...candidates].sort((left, right) => score(right) - score(left)
-      || String(left.date || "9999").localeCompare(String(right.date || "9999")))[0];
-    if (!selected || score(selected) < Math.max(20, localTracks.length * 5)) {
-      throw new Error("No MusicBrainz release had enough track-title overlap to select safely.");
-    }
-    const used = new Set();
-    const manifest = (selected.media || []).flatMap((medium, mediumIndex) => (medium.tracks || []).map((track, trackIndex) => {
-      const title = track.recording?.title || track.title || `Track ${trackIndex + 1}`;
-      const recordingId = track.recording?.id || null;
-      const local = localTracks.find((candidate) => !used.has(candidate.id) && recordingId
-        && candidate.musicBrainzRecordingId === recordingId)
-        || localTracks.find((candidate) => !used.has(candidate.id)
-          && candidate.disc === (Number(medium.position) || mediumIndex + 1)
-          && candidate.track === (Number(track.position) || trackIndex + 1)
-          && normalized(canonicalTrackTitle(candidate.title)) === normalized(canonicalTrackTitle(title)))
-        || localTracks.find((candidate) => !used.has(candidate.id)
-          && normalized(canonicalTrackTitle(candidate.title)) === normalized(canonicalTrackTitle(title)));
-      if (local) used.add(local.id);
-      return {
-        disc: authoritativePosition(medium.position),
-        position: authoritativePosition(track.position),
-        title,
-        recordingId,
-        localTrackId: local?.id || null,
-        quality: local ? { codec: local.codec, bitDepth: local.bitDepth, sampleRate: local.sampleRate, bitRate: local.bitRate } : null,
-        status: local ? "validated" : "missing"
-      };
-    }));
-    const expectedTrackCount = authoritativeExpectedTrackCount(selected.media);
-    const publication = shadowPublicationState({
-      existing: { ...record, authoritative: true, expectedTrackCount },
-      authoritativeManifest: manifest,
-      albumIncomplete: false,
-      testMode
-    });
-    Object.assign(record, {
-      authoritative: true,
-      releaseGroupId: group.id,
-      selectedReleaseId: selected.id,
-      selectedReleaseTitle: selected.title,
-      selectedReleaseCountry: selected.country || null,
-      originalReleaseYear: group["first-release-date"]?.slice(0, 4) || record.originalReleaseYear,
-      expectedTrackCount: retainedExpectedTrackCount(expectedTrackCount, record.expectedTrackCount),
-      localTrackCount: localTracks.length,
-      manifest,
-      status: publication.status,
-      published: publication.published,
-      lastReconciledAt: new Date().toISOString(),
-      lastError: null
-    });
+    Object.assign(record, await identifyAlbumManifest(record, localTracks));
     await saveShadowAlbums();
     return record;
   } catch (error) {
@@ -1230,6 +1261,10 @@ async function loadAcquisitions() {
       const { release, ...state } = savedState;
       if (!state.id || !release?.artist || !release?.title) continue;
       catalogueReleases.set(state.id, release);
+      if (readOnly && (!downloadOnly || !isDownloadOnlyJob(state))) {
+        acquisitionState.set(state.id, state);
+        continue; // Preserve old work verbatim. Opting in is not permission to resume it.
+      }
       if (["queued", "resolving", "running"].includes(state.status)) {
         state.status = "queued";
         state.message = "Recovered after service restart.";
@@ -1237,6 +1272,8 @@ async function loadAcquisitions() {
         state.finishedAt = null;
         delete state.cancelRequested;
         delete state.timeoutRequested;
+        delete state.publicationStarted;
+        delete state.storageFailure;
         acquisitionQueue.push(state.id);
       } else if (state.status === "failed"
         && /rate limit|rate-limited|No exact Spotify album page/i.test(state.message || "")
@@ -1268,7 +1305,7 @@ function recoverApprovedDiscoveries() {
 }
 
 function finishAcquisition(state) {
-  activeAcquisitionId = null;
+  if (activeAcquisitionId === state.id) activeAcquisitionId = null;
   state.queuePosition = 0;
   const shadowId = shadowAlbumId(state.artist, state.title);
   const shadow = shadowAlbums.get(shadowId);
@@ -1278,7 +1315,7 @@ function finishAcquisition(state) {
     shadow.lastAttemptAt = new Date().toISOString();
     void saveShadowAlbums();
   }
-  pruneAcquisitionHistory();
+  if (!downloadOnly) pruneAcquisitionHistory();
   refreshQueuePositions();
   void saveAcquisitions();
   void processAcquisitionQueue();
@@ -1419,6 +1456,11 @@ function acquisitionStage(id) {
 const acquisitionStageMarker = (stage) => join(stage, ".signal-acquisition.json");
 
 async function prepareAcquisitionStage(state, stage) {
+  if (downloadOnly) {
+    await verifyDownloadStorage(downloadConfig);
+    await assertNoSymlinks(stage, { allowMissing: true });
+    if (state.cancelRequested) throw new Error("Cancelled by user.");
+  }
   await rm(stage, { recursive: true, force: true });
   await mkdir(stage, { recursive: true });
   await writeFile(acquisitionStageMarker(stage), `${JSON.stringify({
@@ -1448,6 +1490,11 @@ async function stagingInventory() {
 }
 
 async function validateAndImportStaged(state, stage) {
+  if (downloadOnly) {
+    await verifyDownloadStorage(downloadConfig);
+    await assertSafeStagingTree(stage);
+    if (!isDownloadOnlyJob(state)) throw new Error("Only explicitly requested whole-album downloads are enabled.");
+  }
   await assertAcquisitionStageOwner(state, stage);
   const paths = await walk(stage).catch((error) => error.code === "ENOENT" ? [] : Promise.reject(error));
   if (!paths.length) throw new Error("Downloader exited without adding any album files to staging.");
@@ -1484,7 +1531,30 @@ async function validateAndImportStaged(state, stage) {
     const source = [...albumDirectories][0];
     const destination = resolve(downloadRoot, relative(stage, source));
     if (!destination.startsWith(`${downloadRoot}${sep}`)) throw new Error("Unsafe staged album path.");
+    let validated;
+    if (downloadOnly) {
+      const record = shadowAlbums.get(shadowAlbumId(state.artist, state.title));
+      validated = await identifyAlbumManifest(record, matching.map(({ track }) => track));
+      if (!validated.published || validated.manifest.length !== matching.length) {
+        throw new Error("Staged album did not pass authoritative release validation; files remain in staging.");
+      }
+      // Recheck after the asynchronous catalogue lookup, immediately before committing.
+      await verifyDownloadStorage(downloadConfig);
+      await assertSafeStagingTree(stage);
+      await assertNoSymlinks(destination, { allowMissing: true });
+      if (shuttingDown) throw new Error("Service stopping; staged files retained for restart.");
+      if (state.cancelRequested) throw new Error("Cancelled by user.");
+      state.publicationStarted = true; // Atomic publication has begun; it is no longer cancellable.
+    }
     await publishAlbumDirectory({ source, destination, stage });
+    if (validated) {
+      const byId = new Map(matching.map(({ path, track }) => [track.id, relative(root, join(destination, relative(source, path)))]));
+      Object.assign(shadowAlbums.get(shadowAlbumId(state.artist, state.title)), validated, {
+        published: false, status: "validating",
+        manifest: validated.manifest.map((track) => ({ ...track, localTrackId: byId.get(track.localTrackId) }))
+      });
+      await saveShadowAlbums();
+    }
     return matching.length;
   }
   for (const { path } of matching) {
@@ -1511,14 +1581,19 @@ async function runAcquisition(state, release) {
   }
   let sourceUrl;
   try {
+    if (downloadOnly) {
+      await verifyDownloadStorage(downloadConfig);
+      await verifyDownloader(spotiflacBin);
+    }
     sourceUrl = state.missingTracks?.length
       ? await resolveMissingTrackSource(release, state.missingTracks[0])
       : await resolveMusicBrainzAlbumSource(release);
   } catch (error) {
+    if (shuttingDown) return;
     const rateLimited = error.status === 429 || lookupRateLimitState().active;
     const transient = rateLimited || /timeout|aborted|fetch failed|temporarily|HTTP 5\d\d/i.test(error.message || "");
     state.lookupAttempt = (state.lookupAttempt || 0) + 1;
-    const retryLookup = transient && state.lookupAttempt < acquisitionMaxAttempts;
+    const retryLookup = !state.cancelRequested && transient && state.lookupAttempt < acquisitionMaxAttempts;
     state.status = state.cancelRequested ? "cancelled" : retryLookup ? "queued" : "failed";
     state.message = state.cancelRequested
       ? "Cancelled by user."
@@ -1532,6 +1607,7 @@ async function runAcquisition(state, release) {
     return;
   }
   delete state.lookupAttempt;
+  if (shuttingDown) return;
   if (state.cancelRequested) {
     state.status = "cancelled";
     state.message = "Cancelled by user.";
@@ -1548,6 +1624,9 @@ async function runAcquisition(state, release) {
   void saveShadowAlbums();
   const stage = acquisitionStage(state.id);
   await prepareAcquisitionStage(state, stage);
+  if (downloadOnly) await verifyDownloadStorage(downloadConfig);
+  if (shuttingDown) return;
+  if (state.cancelRequested) throw new Error("Cancelled by user.");
   void saveAcquisitions();
   const child = spawn(
     spotiflacBin,
@@ -1565,6 +1644,10 @@ async function runAcquisition(state, release) {
     }
   );
   activeAcquisitionProcess = child;
+  let resolveCompletion;
+  const completion = new Promise((resolve) => { resolveCompletion = resolve; });
+  activeAcquisitionCompletion = completion;
+  child.once("exit", () => { void terminateProcessTree(child); });
   let tail = "";
   let lastProgressAt = Date.now();
   const capture = (chunk) => {
@@ -1599,20 +1682,51 @@ async function runAcquisition(state, release) {
     terminateProcessTree(child);
   }, Math.min(15_000, Math.max(100, Math.floor(acquisitionStallTimeoutMs / 4))));
   inactivityTimer.unref();
+  let checkingStorage = false;
+  const storageTimer = downloadOnly ? setInterval(async () => {
+    if (checkingStorage) return;
+    checkingStorage = true;
+    try { await verifyDownloadStorage(downloadConfig); }
+    catch {
+      state.storageFailure = true;
+      terminateProcessTree(child);
+    } finally { checkingStorage = false; }
+  }, 1000) : null;
+  storageTimer?.unref();
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
   child.on("error", (error) => {
     clearInterval(inactivityTimer);
+    clearInterval(storageTimer);
     state.status = "failed";
     state.message = error.message;
     state.finishedAt = new Date().toISOString();
     finishAcquisition(state);
   });
-  child.on("close", async (code) => {
+  const completeAcquisition = async (code) => {
     clearInterval(inactivityTimer);
+    clearInterval(storageTimer);
+    try { await terminateProcessTree(child); }
+    catch (error) {
+      acquisitionShutdownUncertain = true;
+      state.status = "failed";
+      state.message = error.message;
+      state.finishedAt = new Date().toISOString();
+      await saveAcquisitions();
+      return; // Keep ownership locked: an unverified writer must not overlap a new job.
+    }
+    if (shuttingDown) return; // Retain the interrupted job for normal restart recovery.
     if (state.finishedAt) return;
     activeAcquisitionProcess = null;
-    if (state.timeoutRequested) {
+    if (state.storageFailure) {
+      state.status = "failed";
+      state.message = "Download storage became unavailable; nothing was published.";
+      state.finishedAt = new Date().toISOString();
+      delete state.storageFailure;
+      finishAcquisition(state);
+      return;
+    }
+    if (state.timeoutRequested && !state.cancelRequested) {
       delete state.timeoutRequested;
       if (state.attempt < acquisitionMaxAttempts) {
         state.status = "queued";
@@ -1636,6 +1750,7 @@ async function runAcquisition(state, release) {
       state.message = "Cancelled by user.";
       state.finishedAt = new Date().toISOString();
       delete state.cancelRequested;
+      delete state.timeoutRequested;
       finishAcquisition(state);
       return;
     }
@@ -1644,8 +1759,9 @@ async function runAcquisition(state, release) {
     if (reportedSuccess) {
       try {
         await validateAndImportStaged(state, stage);
+        if (libraryScanPromise) await libraryScanPromise;
         await scanLibrary();
-        if (!testMode) {
+        if (!testMode && !downloadOnly) {
           await identifyShadowAlbum(shadowAlbumId(state.artist, state.title));
           await refreshPublishedLibrary();
         }
@@ -1654,6 +1770,7 @@ async function runAcquisition(state, release) {
         importError = error;
       }
     }
+    if (shuttingDown && !state.publicationStarted) return;
     const libraryAlbum = cataloguedLibrary.albums.find((album) =>
       normalized(album.artist) === normalized(state.artist)
       && normalized(album.title) === normalized(state.title)
@@ -1662,9 +1779,9 @@ async function runAcquisition(state, release) {
     const remainingMissing = shadowRecord?.authoritative
       ? shadowRecord.manifest.filter((track) => track.status === "missing").map((track) => `${track.disc}:${track.position}`)
       : libraryAlbum?.missingTracks || [];
-    const shadowPublished = testMode || shadowRecord?.published;
+    const shadowPublished = (testMode && !downloadOnly) || shadowRecord?.published;
     const continueTrackRepair = reportedSuccess && state.missingTracks?.length && remainingMissing.length > 0;
-    state.status = reportedSuccess && libraryAlbum && !libraryAlbum.incomplete && shadowPublished
+    state.status = state.cancelRequested ? "cancelled" : reportedSuccess && libraryAlbum && !libraryAlbum.incomplete && shadowPublished
       ? "complete"
       : continueTrackRepair ? "queued" : "failed";
     if (state.status === "complete") {
@@ -1673,7 +1790,7 @@ async function runAcquisition(state, release) {
       managedAlbums.add(albumKey(state.artist, state.title));
       void saveRepairPolicy();
     }
-    state.message = state.status === "complete"
+    state.message = state.status === "cancelled" ? "Cancelled by user." : state.status === "complete"
       ? "Added to your library."
       : state.status === "queued"
         ? `${remainingMissing.length} missing track${remainingMissing.length === 1 ? "" : "s"} remaining; continuing track repair.`
@@ -1693,14 +1810,28 @@ async function runAcquisition(state, release) {
     } else {
       state.finishedAt = new Date().toISOString();
     }
+    delete state.cancelRequested;
+    delete state.publicationStarted;
     finishAcquisition(state);
+  };
+  child.on("close", (code) => {
+    void completeAcquisition(code).catch((error) => {
+      state.status = "failed";
+      state.message = error.message;
+      state.finishedAt = new Date().toISOString();
+      finishAcquisition(state);
+    }).finally(() => {
+      resolveCompletion();
+      if (activeAcquisitionCompletion === completion) activeAcquisitionCompletion = null;
+    });
   });
 }
 
 function cancelAcquisition(id) {
   const state = acquisitionState.get(id);
   if (!state || !["queued", "resolving", "running"].includes(state.status)) return null;
-  if (state.status === "queued") {
+  if (state.publicationStarted) return null;
+  if (state.status === "queued" || id !== activeAcquisitionId) {
     const index = acquisitionQueue.indexOf(id);
     if (index !== -1) acquisitionQueue.splice(index, 1);
     state.status = "cancelled";
@@ -1721,10 +1852,12 @@ function cancelAcquisition(id) {
 function prioritizeAcquisition(id) {
   const state = acquisitionState.get(id);
   if (!state || state.status !== "queued") return null;
+  if (downloadOnly && !isDownloadOnlyJob(state)) return null;
   const index = acquisitionQueue.indexOf(id);
   if (index < 0) return null;
   acquisitionQueue.splice(index, 1);
   acquisitionQueue.unshift(id);
+  state.priority = Math.min(0, ...acquisitionQueue.map((queuedId) => acquisitionState.get(queuedId)?.priority || 0)) - 1;
   state.message = "Prioritised for download.";
   refreshQueuePositions();
   void saveAcquisitions();
@@ -1732,18 +1865,22 @@ function prioritizeAcquisition(id) {
 }
 
 function processAcquisitionQueue() {
+  if (shuttingDown) return;
+  if ((readOnly && !downloadOnly) || acquisitionShutdownUncertain) return;
   if (!initialLibraryScanComplete || activeAcquisitionId || acquisitionQueue.length === 0) return;
   if (lookupRateLimitState().active) {
     scheduleLookupRetry();
     return;
   }
   refreshQueuePositions();
-  const readyIndex = acquisitionQueue.findIndex((candidateId) => {
+  const eligible = acquisitionQueue.filter((id) => !downloadOnly || isDownloadOnlyJob(acquisitionState.get(id)));
+  if (!eligible.length) return;
+  const readyId = eligible.find((candidateId) => {
     const retryAt = new Date(acquisitionState.get(candidateId)?.retryAt || 0).getTime();
     return !retryAt || retryAt <= Date.now();
   });
-  if (readyIndex < 0) {
-    const nextRetry = Math.min(...acquisitionQueue
+  if (!readyId) {
+    const nextRetry = Math.min(...eligible
       .map((candidateId) => new Date(acquisitionState.get(candidateId)?.retryAt || 0).getTime())
       .filter(Boolean));
     if (acquisitionRetryTimer) clearTimeout(acquisitionRetryTimer);
@@ -1754,7 +1891,7 @@ function processAcquisitionQueue() {
     acquisitionRetryTimer.unref();
     return;
   }
-  const [id] = acquisitionQueue.splice(readyIndex, 1);
+  const [id] = acquisitionQueue.splice(acquisitionQueue.indexOf(readyId), 1);
   const state = acquisitionState.get(id);
   const release = catalogueReleases.get(id);
   if (!state || !release) {
@@ -1774,7 +1911,13 @@ function processAcquisitionQueue() {
   activeAcquisitionId = id;
   delete state.retryAt;
   refreshQueuePositions();
-  void runAcquisition(state, release);
+  void runAcquisition(state, release).catch((error) => {
+    state.status = state.cancelRequested ? "cancelled" : "failed";
+    state.message = state.cancelRequested ? "Cancelled by user." : error.message;
+    state.finishedAt = new Date().toISOString();
+    delete state.cancelRequested;
+    finishAcquisition(state);
+  });
 }
 
 function queueAlbum(id, release, origin = "manual") {
@@ -1790,6 +1933,7 @@ function queueAlbum(id, release, origin = "manual") {
     artist: release.artist,
     title: release.title,
     origin,
+    ...(downloadOnly ? { downloadOnly: true } : {}),
     priority: acquisitionPriorities[origin] || acquisitionPriorities.manual,
     status: "queued",
     message: "Queued for download.",
@@ -1835,7 +1979,13 @@ function acquireAlbum(id, response, origin = "manual") {
       error: "Search for this album again before downloading it."
     });
   }
-  for (const state of acquisitionState.values()) {
+  if (downloadOnly) {
+    const pending = [...acquisitionState.values()].find((item) => !isDownloadOnlyJob(item)
+      && ["queued", "resolving", "running"].includes(item.status)
+      && albumKey(item.artist, item.title) === albumKey(release.artist, release.title));
+    if (pending) return sendJson(response, 409, { error: "A preserved legacy job exists for this album. Review or cancel it explicitly first." });
+  }
+  for (const state of downloadOnly ? [] : acquisitionState.values()) {
     if (state.status === "cancelled"
       && normalized(state.artist) === normalized(release.artist)
       && normalized(state.title) === normalized(release.title)) {
@@ -2397,6 +2547,7 @@ async function prepareFeaturedRecommendations() {
 }
 
 async function coverFor(id, response) {
+  await verifyMusicMount();
   const source = await openPublishedMedia(id, library.tracks, root);
   if (!source) return sendJson(response, 404, { error: "Track not found" });
   try {
@@ -2418,6 +2569,7 @@ async function coverFor(id, response) {
 }
 
 async function streamAudio(id, request, response) {
+  await verifyMusicMount();
   const source = await openPublishedMedia(id, library.tracks, root);
   if (!source) return sendJson(response, 404, { error: "Track not found" });
   const info = await source.stat();
@@ -2453,7 +2605,32 @@ async function streamAudio(id, request, response) {
 
 const server = createServer(async (request, response) => {
   try {
+    if (shuttingDown) return sendJson(response, 503, { error: "Format is stopping. Retry after restart." });
     const url = new URL(request.url, `http://${request.headers.host}`);
+    const downloadAction = downloadOnly && request.method === "POST" && downloadActions.has(url.pathname);
+    if (downloadAction) {
+      if (!downloadRequestAllowed(request, { host, port })) {
+        return sendJson(response, 403, { error: "Download controls require a same-origin loopback request." });
+      }
+      if (url.pathname === "/api/acquire-album") {
+        const readiness = await downloadReadiness(downloadConfig);
+        if (acquisitionShutdownUncertain) return sendJson(response, 503, { error: "Downloader shutdown could not be verified. Review the service before acquiring more music." });
+        if (!readiness.ready) return sendJson(response, 503, { error: "Downloads are unavailable.", reason: readiness.reason });
+      }
+    }
+    if (readOnly && !["GET", "HEAD"].includes(request.method)
+      && !downloadAction && !(request.method === "POST" && ["/api/rescan", "/api/shadow-albums/reconcile"].includes(url.pathname))) {
+      return sendJson(response, 403, { error: "This Format server is in read-only mode." });
+    }
+    if (url.pathname === "/api/health") {
+      const downloads = downloadOnly ? await downloadReadiness(downloadConfig)
+        : { enabled: !readOnly, ready: !readOnly, reason: readOnly ? "disabled" : null };
+      if (acquisitionShutdownUncertain) Object.assign(downloads, { ready: false, reason: "storage_unavailable" });
+      return sendJson(response, 200, { readOnly, initialLibraryScanComplete,
+        albums: library.albums.length, tracks: library.tracks.length, downloads,
+        capabilities: { acquire: downloads.ready, cancel: !readOnly || downloadOnly,
+          prioritize: !readOnly || downloadOnly, editMetadata: !readOnly, deleteMedia: !readOnly, repair: !readOnly } });
+    }
     if (url.pathname === "/api/library") return sendJson(response, 200, library);
     if (url.pathname === "/api/bootstrap") {
       return sendJson(response, 200, {
@@ -2671,7 +2848,7 @@ const server = createServer(async (request, response) => {
     createReadStream(path).pipe(response);
   } catch (error) {
     console.error(error);
-    sendJson(response, 500, { error: "Internal server error" });
+    sendJson(response, error.status || 500, { error: error.status === 503 ? "The configured music storage is unavailable." : "Internal server error" });
   }
 });
 
@@ -2682,14 +2859,17 @@ await loadShadowAlbums();
 await loadFirstReleaseYears();
 await loadCataloguedLibrarySnapshot();
 await loadLookupRateLimit();
-server.listen(port, "0.0.0.0", () => {
-  console.log(`Format listening on http://0.0.0.0:${port}`);
+server.listen(port, host, () => {
+  console.log(`Format listening on http://${host}:${port}`);
 });
 void scanLibrary()
   .then(() => {
     initialLibraryScanComplete = true;
-    reconcileCompletedAcquisitions();
-    processAcquisitionQueue();
+    if (!readOnly) {
+      reconcileCompletedAcquisitions();
+      processAcquisitionQueue();
+    }
+    if (downloadOnly) processAcquisitionQueue();
     void enrichFirstReleaseYears().catch((error) => console.error("First-release year enrichment failed:", error.message));
     if (shadowRepairEnabled) {
       void maintainShadowAlbums().catch((error) => console.error("Initial shadow maintenance failed:", error.message));
@@ -2708,3 +2888,37 @@ const libraryMaintenanceTimer = setInterval(() => {
   }
 }, libraryMaintenanceIntervalMs);
 libraryMaintenanceTimer.unref();
+
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close();
+  server.closeAllConnections();
+  clearInterval(libraryScanTimer);
+  clearInterval(libraryMaintenanceTimer);
+  clearTimeout(acquisitionRetryTimer);
+  clearTimeout(lookupRetryTimer);
+  try {
+    await terminateProcessTree(activeAcquisitionProcess);
+    // Publication is an atomic rename followed by durable manifest/queue state.
+    // Wait for that handler before exit so a renamed album is not stranded.
+    await activeAcquisitionCompletion;
+    const state = acquisitionState.get(activeAcquisitionId);
+    if (state?.cancelRequested && !state.publicationStarted) {
+      state.status = "cancelled";
+      state.message = "Cancelled by user.";
+      state.finishedAt = new Date().toISOString();
+      delete state.cancelRequested;
+      finishAcquisition(state);
+    }
+    if (!readOnly || downloadOnly) await saveAcquisitions();
+    await shadowSavePromise;
+    process.exit(0);
+  } catch (error) {
+    console.error("Downloader shutdown could not be verified:", error.message);
+    process.exit(1); // The systemd control group remains the final stop boundary.
+  }
+}
+
+process.on("SIGTERM", () => { void shutdown(); });
+process.on("SIGINT", () => { void shutdown(); });
