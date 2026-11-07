@@ -115,6 +115,34 @@ The executable path is pinned into the service configuration. Source, runtime,
 state and cache stay on the Pi's system disk; media remains on the external HDD.
 The runtime checksum was obtained from the official versioned SHASUMS256.txt.
 
+## Restore the original download provider
+
+The download-enabled bootstrap installs the same **SpotiFLAC 0.7.0** used by
+Format's original Docker deployment in a private versioned Python environment,
+checks its installed version and CLI options, then enables the existing album
+queue with a dedicated `.format-acquisitions` folder on the verified HDD:
+
+```sh
+sh deployment/pi/setup.sh '/verified/HDD/Music' --enable-downloads
+```
+
+Run this explicitly as the normal Pi user. It installs Python venv support from
+the OS repositories if missing and SpotiFLAC plus dependencies from PyPI. Use
+only providers and material you are authorised to download. No provider login
+or credentials are created. An existing partial or incompatible provider
+installation is retained and stops setup rather than being overwritten.
+The one-argument command continues to install read-only operation.
+
+The original provider order (Qobuz, Amazon, Tidal, Deezer), hi-res lossless
+quality, track numbering, retries, queue and progress reporting are unchanged.
+Existing media remains read-only. New albums must still pass authoritative
+release validation before publication. Runtime readiness reports storage or
+executable failures through `/api/health`; a CLI check is not evidence that a
+remote provider is operational. Real ARM64/provider verification is still
+required on the target. No external media is downloaded by repository tests.
+If an existing configuration uses a different acquisition directory, retain it
+using the explicit installer command below instead of the bootstrap default.
+
 ## Explicit download-only mode (optional)
 
 The default command above remains read-only. To enable acquisition, first
