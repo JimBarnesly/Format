@@ -40,7 +40,7 @@ async function startFixture(t,{enabled=true,env={},jobs=[],initialDisk="fixture-
   const log=join(temporary,'downloader-log');
   const pidFile=join(temporary,'downloader-pid');
   const downloader=join(bin,'mock-downloader');
-  await writeFile(downloader,`#!/bin/sh\nset -eu\necho "$$" > "$FIXTURE_PID"\nid="\${1##*/}"\necho "$id" >> "$FIXTURE_LOG"\nout="$2/Fixture Artist/$id"\nmkdir -p "$out"\ncase "$id" in fixture-6) ln -s "$FIXTURE_ORIGINAL" "$out/track.flac" ;; *) cp "$FIXTURE_FILES/$id.flac" "$out/track.flac" ;; esac\ncase "$id" in fixture-11) trap '' TERM; echo term-resistant-ready >> "$FIXTURE_LOG"; while :; do sleep 1; done ;; fixture-1|fixture-7|fixture-8) sleep 30 ;; esac\n`,{mode:0o755});
+  await writeFile(downloader,`#!/bin/sh\nset -eu\ntest "$HOME" = "$CACHE_DIR"\nmkdir -p "$HOME/.cache/spotiflac"\nprintf ready > "$HOME/.cache/spotiflac/provider-cache-test"\necho "$$" > "$FIXTURE_PID"\nid="\${1##*/}"\necho "$id" >> "$FIXTURE_LOG"\nout="$2/Fixture Artist/$id"\nmkdir -p "$out"\ncase "$id" in fixture-6) ln -s "$FIXTURE_ORIGINAL" "$out/track.flac" ;; *) cp "$FIXTURE_FILES/$id.flac" "$out/track.flac" ;; esac\ncase "$id" in fixture-11) trap '' TERM; echo term-resistant-ready >> "$FIXTURE_LOG"; while :; do sleep 1; done ;; fixture-1|fixture-7|fixture-8) sleep 30 ;; esac\n`,{mode:0o755});
   const metadata=join(temporary,'mock-metadata.mjs');
   await writeFile(metadata,`
     const releases=${JSON.stringify(releases)};

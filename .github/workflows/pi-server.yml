@@ -19,5 +19,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm run verify
       - run: sh -n deployment/pi/setup.sh && python3 -m unittest discover -s deployment/pi -p 'test_*.py'
+      - name: Verify actual pinned provider CLI contract without executing it
+        run: |
+          python3 -m pip download --isolated --only-binary=:all: --no-deps --index-url https://pypi.org/simple --dest /tmp/provider-wheel SpotiFLAC==0.7.0
+          python3 deployment/pi/verify_provider_contract.py /tmp/provider-wheel/spotiflac-0.7.0-py3-none-any.whl
       - name: Verify disposable systemd filesystem namespace
         run: python3 deployment/pi/namespace_check.py

@@ -35,7 +35,7 @@ def install(destination, runner=subprocess.run, create=None):
             f'assert version("SpotiFLAC") == {VERSION!r}, "Unexpected SpotiFLAC version"'], check=True)
     result = runner([str(executable), '--help'], check=True, text=True, capture_output=True)
     for option in ('--service', '--quality', '--filename-format', '--use-track-numbers',
-                   '--use-artist-subfolders', '--use-album-subfolders', '--retries', '--timeout'):
+                   '--use-artist-subfolders', '--use-album-subfolders', '--retries'):
         if option not in result.stdout:
             raise RuntimeError(f'Installed provider does not support required option: {option}')
     return executable

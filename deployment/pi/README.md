@@ -133,6 +133,18 @@ or credentials are created. An existing partial or incompatible provider
 installation is retained and stops setup rather than being overwritten.
 The one-argument command continues to install read-only operation.
 
+The pinned PyPI artifact is `spotiflac-0.7.0-py3-none-any.whl` (SHA-256
+`8fd5c715ce2a6b7b6cb7189e0fea1e2005a39f1af9682cdd49896055cb56d360`),
+from https://pypi.org/project/SpotiFLAC/0.7.0/ and its listed upstream
+https://github.com/ShuShuzinhuu/SpotiFLAC-Module-Version. That upstream is
+archived. The universal wheel and Python 3.11 ARM64 dependency wheels are
+available, but this does not establish that remote providers remain operational.
+CI inspects the pinned wheel's actual CLI parser without executing it. The old
+unsupported `--timeout 120` argument is removed: Format's own stall watchdog
+still terminates the downloader process group and handles bounded retries.
+In protected mode the provider home/cache is redirected into Format’s existing
+writable cache directory, rather than relaxing protection of the user’s home.
+
 The original provider order (Qobuz, Amazon, Tidal, Deezer), hi-res lossless
 quality, track numbering, retries, queue and progress reporting are unchanged.
 Existing media remains read-only. New albums must still pass authoritative

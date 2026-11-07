@@ -8,7 +8,7 @@ import unittest
 spec = importlib.util.spec_from_file_location('provider', Path(__file__).with_name('install_downloader.py'))
 provider = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(provider)
-HELP = '--service --quality --filename-format --use-track-numbers --use-artist-subfolders --use-album-subfolders --retries --timeout'
+HELP = '--service --quality --filename-format --use-track-numbers --use-artist-subfolders --use-album-subfolders --retries'
 
 
 class ProviderTests(unittest.TestCase):
@@ -75,3 +75,11 @@ class ProviderTests(unittest.TestCase):
         self.assertIn('install_downloader.py', setup)
         self.assertIn('spotiflac-' + provider.VERSION + '/bin/spotiflac', setup)
         self.assertIn('--acquisition-root "${1%/}/.format-acquisitions"', setup)
+
+    def test_provider_timeout_stays_in_wrapper(self):
+        server = (Path(__file__).resolve().parents[2] / 'server.mjs').read_text()
+        invocation = server.split('const child = spawn(\n    spotiflacBin,', 1)[1].split('cwd: spotiflacCwd', 1)[0]
+        self.assertNotIn('--timeout', invocation)
+        self.assertIn('acquisitionStallTimeoutMs', server)
+        self.assertIn('terminateProcessTree(child)', server)
+        self.assertIn('env: downloadOnly ? { ...process.env, HOME: cacheDir } : process.env', server)
