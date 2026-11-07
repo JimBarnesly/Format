@@ -2,7 +2,12 @@
 set -eu
 # User-run setup for a 64-bit Raspberry Pi. No mount or media modifications.
 [ "$(id -u)" -ne 0 ] || { echo 'Run as the normal Pi user, not sudo.' >&2; exit 1; }
-[ "$#" -eq 1 ] || { echo 'Usage: sh deployment/pi/setup.sh /verified/HDD/Music' >&2; exit 1; }
+downloads=false
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || { echo 'Usage: sh deployment/pi/setup.sh /verified/HDD/Music [--enable-downloads]' >&2; exit 1; }
+if [ "$#" -eq 2 ]; then
+  [ "$2" = '--enable-downloads' ] || { echo 'Unknown setup option.' >&2; exit 1; }
+  downloads=true
+fi
 [ -d "$1" ] || { echo 'The music folder does not exist. No changes made.' >&2; exit 1; }
 case "$(uname -m)" in aarch64|arm64) ;; *) echo 'This bootstrap requires 64-bit ARM Raspberry Pi OS.' >&2; exit 1;; esac
 for tool in python3 curl tar sha256sum findmnt systemctl; do
@@ -28,4 +33,16 @@ if [ ! -x "$runtime/bin/node" ]; then
 fi
 [ "$("$runtime/bin/node" --version)" = "$version" ] || { echo 'Unexpected Node runtime version.' >&2; exit 1; }
 export PATH="$runtime/bin:$PATH"
-python3 "$script_dir/install.py" --music-root "$1" --install
+if [ "$downloads" = true ]; then
+  # Same pinned provider as Format's original container, isolated from OS Python.
+  if ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install --no-remove python3-venv
+  fi
+  python3 "$script_dir/install_downloader.py"
+  python3 "$script_dir/install.py" --music-root "$1" --install --enable-downloads \
+    --acquisition-root "${1%/}/.format-acquisitions" \
+    --downloader "$HOME/.local/share/format-runtime/spotiflac-0.7.0/bin/spotiflac"
+else
+  python3 "$script_dir/install.py" --music-root "$1" --install
+fi

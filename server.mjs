@@ -1635,11 +1635,13 @@ async function runAcquisition(state, release) {
       "--quality", "HI_RES_LOSSLESS",
       "--filename-format", "[{year}] {album}/{title}",
       "--use-track-numbers", "--use-artist-subfolders", "--use-album-subfolders",
-      "--retries", "2", "--timeout", "120"],
+      "--retries", "2"],
     {
       cwd: spotiflacCwd,
       detached: true,
-      env: process.env,
+      // The provider uses ~/.cache directly. Keep it inside the existing
+      // writable state island, not the systemd-protected user home.
+      env: downloadOnly ? { ...process.env, HOME: cacheDir } : process.env,
       stdio: ["ignore", "pipe", "pipe"]
     }
   );
